@@ -1,7 +1,5 @@
-#!/usr/bin/python
-# coding:utf-8
 # Author: ASU --<andrei.suiu@gmail.com>
-# Purpose: utility library for >=Python3.6
+# Purpose: utility library for >=Python3.8
 import collections
 import io
 import itertools
@@ -11,7 +9,7 @@ import pickle
 import struct
 import sys
 import threading
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections import abc, defaultdict
 from functools import partial, reduce
 from itertools import groupby
@@ -25,16 +23,7 @@ from typing import AbstractSet, Any, BinaryIO, Callable, Dict, Generator, Iterab
     NamedTuple, Optional, overload, Set, Tuple, TypeVar, Union
 
 from tblib import pickling_support
-
-from pyxtension import validate, PydanticValidated
-from pyxtension.throttler import Throttler
-
-ifilter = filter
-imap = map
-izip = zip
-xrange = range
-from pyxtension.fileutils import openByExtension
-
+from throttlex import Throttler
 from tqdm import tqdm
 
 __author__ = 'andrei.suiu@gmail.com'
@@ -59,13 +48,18 @@ class ItrFromFunc(Iterable[_K]):
         return iter(self._f())
 
 
-class EndQueue:
+class _EndQueue:
     pass
 
 
-class MapException:
+class _MapException:
     def __init__(self, exc_info):
         self.exc_info = exc_info
+
+
+class _QElement(NamedTuple):
+    i: int
+    el: Any
 
 
 class TqdmMapper:
@@ -80,12 +74,6 @@ class TqdmMapper:
     def __call__(self, el: _K) -> _K:
         self._tqdm.update()
         return el
-
-
-class _QElement(NamedTuple):
-    i: int
-    el: Any
-
 
 class _IStream(Iterable[_K], ABC):
     @staticmethod
@@ -111,47 +99,47 @@ class _IStream(Iterable[_K], ABC):
     def __fastmap_thread(f, qin, qout):
         while True:
             el = qin.get()
-            if isinstance(el, EndQueue):
+            if isinstance(el, _EndQueue):
                 qin.put(el)
                 return
             try:
                 newEl = f(el)
                 qout.put(newEl)
             except:
-                qout.put(MapException(sys.exc_info()))
+                qout.put(_MapException(sys.exc_info()))
 
     @staticmethod
     def __mtmap_thread(f, qin, qout):
         """
-        :type qin:  Queue[Union[_QElement, EndQueue]]
-        :type qout: Queue[Union[_QElement, MapException]]
+        :type qin:  Queue[Union[_QElement, _EndQueue]]
+        :type qout: Queue[Union[_QElement, _MapException]]
         """
         while True:
             q_el = qin.get()
 
-            if isinstance(q_el, EndQueue):
+            if isinstance(q_el, _EndQueue):
                 qin.put(q_el)
                 return
             try:
                 newEl = f(q_el.el)
                 qout.put(_QElement(q_el.i, newEl))
             except:
-                qout.put(MapException(sys.exc_info()))
+                qout.put(_MapException(sys.exc_info()))
 
     @staticmethod
     def __fastFlatMap_thread(f, qin, qout):
         while True:
             itr = qin.get()
-            if isinstance(itr, EndQueue):
+            if isinstance(itr, _EndQueue):
                 qin.put(itr)
-                qout.put(EndQueue())
+                qout.put(_EndQueue())
                 return
             try:
                 newItr = f(itr)
                 for el in newItr:
                     qout.put(el)
             except:
-                qout.put(MapException(sys.exc_info()))
+                qout.put(_MapException(sys.exc_info()))
 
     def __fastmap_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int):
         qin = Queue(bufferSize)
@@ -177,25 +165,25 @@ class _IStream(Iterable[_K], ABC):
                 try:
                     el = next(itr)
                 except StopIteration:
-                    qin.put(EndQueue())
+                    qin.put(_EndQueue())
                     for t in threadPool:
                         t.join()
                     while not qout.empty():
                         newEl = qout.get()
-                        if isinstance(newEl, MapException):
+                        if isinstance(newEl, _MapException):
                             raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
                         yield newEl
                     break
                 else:
                     qin.put(el)
                     newEl = qout.get()
-                    if isinstance(newEl, MapException):
+                    if isinstance(newEl, _MapException):
                         raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
                     yield newEl
         finally:
             while not qin.empty():
                 qin.get()
-            qin.put(EndQueue())
+            qin.put(_EndQueue())
             while not qout.empty() or not qout.empty():
                 qout.get()
             for t in threadPool:
@@ -237,19 +225,20 @@ class _IStream(Iterable[_K], ABC):
             nonlocal cache
             while not qout.empty():
                 q_el = qout.get()
-                if isinstance(q_el, MapException):
+                if isinstance(q_el, _MapException):
                     raise q_el.exc_info[0](q_el.exc_info[1]).with_traceback(q_el.exc_info[2])
                 cache[q_el.i] = q_el.el
             for el in extract_all_from_cache():
                 yield el
-            validate(out_i == in_i + 1, "__mtmap_generator Expecting for all elements to be in cache")
+            if out_i != in_i + 1:
+                raise RuntimeError("__mtmap_generator Expecting for all elements to be in cache")
 
         try:
             while 1:
                 try:
                     el = next(itr)
                 except StopIteration:
-                    qin.put(EndQueue())
+                    qin.put(_EndQueue())
                     for t in threadPool:
                         t.join()
                     for el in wait_for_all():
@@ -259,7 +248,7 @@ class _IStream(Iterable[_K], ABC):
                     in_i += 1
                     qin.put(_QElement(in_i, el))
                     q_el = qout.get()
-                    if isinstance(q_el, MapException):
+                    if isinstance(q_el, _MapException):
                         raise q_el.exc_info[0](q_el.exc_info[1]).with_traceback(q_el.exc_info[2])
                     cache[q_el.i] = q_el.el
                 for el in extract_all_from_cache():
@@ -267,7 +256,7 @@ class _IStream(Iterable[_K], ABC):
         finally:
             while not qin.empty():
                 qin.get()
-            qin.put(EndQueue())
+            qin.put(_EndQueue())
             while not qout.empty() or not qout.empty():
                 qout.get()
             for t in threadPool:
@@ -279,7 +268,7 @@ class _IStream(Iterable[_K], ABC):
             try:
                 el = next(itr)
             except StopIteration:
-                qin.put(EndQueue())
+                qin.put(_EndQueue())
                 return
             else:
                 qin.put(el)
@@ -307,9 +296,9 @@ class _IStream(Iterable[_K], ABC):
         qout_counter = 0
         while qout_counter < len(threadPool):
             newEl = qout.get()
-            if isinstance(newEl, MapException):
+            if isinstance(newEl, _MapException):
                 raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
-            if isinstance(newEl, EndQueue):
+            if isinstance(newEl, _EndQueue):
                 qout_counter += 1
                 if qout_counter >= len(threadPool):
                     inputThread.join()
@@ -317,26 +306,26 @@ class _IStream(Iterable[_K], ABC):
                         t.join()
                     while not qout.empty():
                         newEl = qout.get()
-                        if isinstance(newEl, MapException):
+                        if isinstance(newEl, _MapException):
                             raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
                         yield newEl
             else:
                 yield newEl
 
     @staticmethod
-    def exc_info_decorator(f: Callable[[_K], _V], el: _K) -> Union[MapException, _V]:
+    def exc_info_decorator(f: Callable[[_K], _V], el: _K) -> Union[_MapException, _V]:
         """This decorates f to pass the exception traceback properly"""
         try:
             return f(el)
         except Exception as e:
             pickling_support.install(e)
-            return MapException(sys.exc_info())
+            return _MapException(sys.exc_info())
 
     def __mp_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int) -> Generator[_V, None, None]:
         p = Pool(poolSize)
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap(decorated_f_with_exc_passing, self, chunksize=bufferSize):
-            if isinstance(el, MapException):
+            if isinstance(el, _MapException):
                 raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
             yield el
         p.close()
@@ -348,7 +337,7 @@ class _IStream(Iterable[_K], ABC):
         try:
             decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
             for el in p.imap_unordered(decorated_f_with_exc_passing, iter(self), chunksize=bufferSize):
-                if isinstance(el, MapException):
+                if isinstance(el, _MapException):
                     raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
                 yield el
         except GeneratorExit:
@@ -512,6 +501,9 @@ class _IStream(Iterable[_K], ABC):
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2 ** 12:
             raise ValueError("bufferSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
         return stream(lambda: self.__fastFlatMap_generator(predicate, poolSize, bufferSize))
+
+    def map_stream(self, f: Callable[['_IStream[_K]'], _T]) -> _T:
+        return f(self)
 
     def enumerate(self) -> 'stream[Tuple[int,_K]]':
         return stream(zip(range(0, sys.maxsize), self))
@@ -681,10 +673,6 @@ class _IStream(Iterable[_K], ABC):
             else:
                 res[k] = v
         return res
-
-    def toJson(self) -> 'JsonList':
-        from pyxtension.Json import JsonList
-        return JsonList(self)
 
     @overload
     def __getitem__(self, i: slice) -> 'stream[_K]':
@@ -1110,7 +1098,19 @@ class _IStream(Iterable[_K], ABC):
         return stream(lambda: indexIgnorer(indexSet, self))
 
 
-class stream(_IStream, Iterable[_K], PydanticValidated):
+class _PydanticValidated:
+    @classmethod
+    def __get_validators__(cls):
+        yield cls._pydantic_validator
+
+    @classmethod
+    def _pydantic_validator(cls, v):
+        if not isinstance(v, cls):
+            raise TypeError(f'{repr(v)} is of type {type(v)} but is expected to be of {cls}')
+        return v
+
+
+class stream(_IStream, Iterable[_K], _PydanticValidated):
     def __init__(self, itr: Optional[Union[Iterator[_K], Callable[[], Iterable[_K]]]] = None):
         self._itr, self._f = self._init_itr(itr)
 
@@ -1170,25 +1170,21 @@ class stream(_IStream, Iterable[_K], PydanticValidated):
             yield s
 
     @staticmethod
-    def readFromBinaryChunkStream(readStream: Union[BinaryIO, str],
+    def readFromBinaryChunkStream(readStream: BinaryIO,
                                   format: str = "<L",
                                   statHandler: Optional[Callable[[int, int], None]] = None) -> 'stream[_V]':
-        '''
+        """
         :param statHandler: statistics handler, will be called before every yield with a tuple (n,size)
-        '''
-        if isinstance(readStream, str):
-            readStream = openByExtension(readStream, mode='r', buffering=2 ** 12)
+        """
         return stream(stream.__binaryChunksStreamGenerator(readStream, format, statHandler))
 
     @staticmethod
-    def loadFromPickled(file: Union[BinaryIO, str],
-                        format: str = "<L", statHandler: Optional[Callable[[int, int], None]] = None) -> 'stream[_V]':
-        '''
+    def loadFromPickled(file: BinaryIO, format: str = "<L", statHandler: Optional[Callable[[int, int], None]] = None) -> 'stream[_V]':
+        """
         :param file: should be path or binary file stream
+        :param format: format of the header
         :param statHandler: statistics handler, will be called before every yield with a tuple (n,size)
-        '''
-        if isinstance(file, str):
-            file = openByExtension(file, mode='r', buffering=2 ** 12)
+        """
         return stream.readFromBinaryChunkStream(file, format, statHandler).map(pickle.loads)
 
 
@@ -1199,34 +1195,29 @@ class AbstractSynchronizedBufferedStream(stream):
     """
 
     def __init__(self):
-        self.__queue = slist()
+        self.__queue = collections.deque()
         self.__lock = threading.RLock()
-        self.__idx = -1
         super().__init__()
 
     def __next__(self):
-        self.__lock.acquire()
-        try:
-            val = self.__queue[self.__idx]
-        except IndexError:
-            self.__queue = self._getNextBuffer()
-            assert isinstance(self.__queue, slist)
-            if len(self.__queue) == 0:
-                raise StopIteration
-            val = self.__queue[0]
-            self.__idx = 0
+        with self.__lock:
+            try:
+                val = self.__queue.popleft()
+            except IndexError:
+                self.__queue.extend(self._getNextBuffer())
+                if len(self.__queue) == 0:
+                    raise StopIteration
+                val = self.__queue.popleft()
 
-        self.__idx += 1
-        self.__lock.release()
-        return val
+            return val
 
     def __iter__(self):
         return self
 
-    def _getNextBuffer(self):
+    @abstractmethod
+    def _getNextBuffer(self) -> Iterable[_K]:
         """
         :return: a list of items for the buffer
-        :rtype: slist[T]
         """
         raise NotImplementedError
 
@@ -1237,16 +1228,16 @@ class AbstractSynchronizedBufferedStream(stream):
         return object.__repr__(self)
 
 
-class SynchronizedBufferedStream(AbstractSynchronizedBufferedStream):
-    def __init__(self, iteratorOverBuffers: 'Iterator[slist[_T]]'):
-        self.__iteratorOverBuffers = iter(iteratorOverBuffers)
-        super(SynchronizedBufferedStream, self).__init__()
+class buffered_stream(AbstractSynchronizedBufferedStream):
+    def __init__(self, buffers: 'Iterable[Iterable[_T]]'):
+        self.__buffers = iter(buffers)
+        super(buffered_stream, self).__init__()
 
-    def _getNextBuffer(self) -> 'slist[_T]':
+    def _getNextBuffer(self) -> Iterable[_T]:
         try:
-            return next(self.__iteratorOverBuffers)
+            return next(self.__buffers)
         except StopIteration:
-            return slist()
+            return []
 
 
 class sset(set, MutableSet[_K], _IStream):
@@ -1443,10 +1434,6 @@ class sdict(Dict[_K, _V], dict, _IStream):
             total = self.size()
         return super().tqdm(desc, total, leave, file, ncols, mininterval, maxinterval, ascii, unit, unit_scale,
                             dynamic_ncols, smoothing, initial, position, postfix, gui, **kwargs)
-
-    def toJson(self) -> 'sdict[_K,_V]':
-        from pyxtension.Json import Json
-        return Json(self)
 
 
 class defaultstreamdict(sdict):

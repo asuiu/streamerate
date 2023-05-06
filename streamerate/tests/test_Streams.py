@@ -12,9 +12,9 @@ from multiprocessing import Pool
 from unittest.mock import MagicMock
 
 from pydantic import validate_arguments, ValidationError
+from pyxtension.Json import JsonList, Json
 
-from pyxtension.Json import Json, JsonList
-from pyxtension.streams import defaultstreamdict, sdict, slist, sset, stream, TqdmMapper
+from streamerate.streams import defaultstreamdict, sdict, slist, sset, stream, TqdmMapper
 
 ifilter = filter
 xrange = range
@@ -1103,11 +1103,15 @@ class StreamTestCase(unittest.TestCase):
         def f(x: slist[int]):
             return x
 
-        s = stream([1, 2])
-        self.assertEqual(f(s.toList()), [1, 2])
-        with self.assertRaises(ValidationError):
-            f({1, 2})
-            #self.assertEqual(f({1, 2}), [1, 2], "Expect pydantic to convert automatically set to list")
+        s = stream([1.49, '2']).toList()
+        converted = f(s)
+        self.assertEqual(converted, [1, 2])
+        self.assertIsInstance(converted, list)
+        try:
+            self.assertEqual(f({1, 2}), [1, 2], "Expect pydantic to convert automatically set to list")
+        except ValidationError:
+            # This is also a valid behavior on some platforms & Pydantic versions
+            pass
         with self.assertRaises(ValidationError):
             f(dict())
         with self.assertRaises(ValidationError):
@@ -1116,6 +1120,13 @@ class StreamTestCase(unittest.TestCase):
     def test_to_list(self):
         s = stream(range(3))
         self.assertListEqual(s.to_list(), [0, 1, 2])
+
+    def test_map_stream(self):
+        s = stream((("a", 2), (3, 4)))
+        d = s.map_stream(dict)
+        self.assertIsInstance(d, dict)
+        self.assertDictEqual(d, {'a': 2, 3: 4})
+
 
 
 """

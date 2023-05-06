@@ -1,69 +1,44 @@
-# pyxtension
-[![build Status](https://travis-ci.org/asuiu/pyxtension.svg?branch=master)](https://travis-ci.org/asuiu/pyxtension)
-[![Coverage Status](https://coveralls.io/repos/asuiu/pyxtension/badge.svg?branch=master&service=github)](https://coveralls.io/github/asuiu/pyxtension?branch=master)
+# streamerate
+[![build Status](https://travis-ci.org/asuiu/streamerate.svg?branch=master)](https://travis-ci.org/asuiu/streamerate)
+[![Coverage Status](https://coveralls.io/repos/asuiu/streamerate/badge.svg?branch=master&service=github)](https://coveralls.io/github/asuiu/streamerate?branch=master)
 
-[pyxtension](https://github.com/asuiu/pyxtension) is a pure Python MIT-licensed library that includes Scala-like streams (using [Fluent Interface pattern](https://en.wikipedia.org/wiki/Fluent_interface)), Json with attribute access syntax, and other common-use stuff.
+__[streamerate](https://github.com/asuiu/streamerate)__  is a powerful pure-Python library inspired by **[Fluent Interface pattern](https://en.wikipedia.org/wiki/Fluent_interface)** (used by Java 8 streams), providing a chainable and expressive approach to processing iterable data. 
 
-###### Note:
 
-**Drop support & maintenance for Python 2.x version, due to [Py2 death](https://www.python.org/doc/sunset-python-2/).**
+By leveraging the **[Fluent Interface pattern](https://en.wikipedia.org/wiki/Fluent_interface)**, [streamerate](https://github.com/asuiu/streamerate) enables you to chain together multiple operations, such as filtering, mapping, and reducing, to create complex data processing pipelines with ease. With streamerate, you can write elegant and readable code that efficiently operates on streams of data, facilitating the development of clean and expressive Python applications.
+
+
+__[streamerate](https://github.com/asuiu/streamerate)__ empowers you to write elegant and functional code, unlocking the full potential of your iterable data processing pipelines
+
+The library is distributed under the permissive [MIT license](https://opensource.org/license/mit/), allowing you to freely use, modify, and distribute it in both open-source and commercial projects.
+
+*Note:* __[streamerate](https://github.com/asuiu/streamerate)__ originated as part of the [pyxtension](https://github.com/asuiu/pyxtension) project but has since been migrated as a standalone library.  
  
- Although Py2 version will remain in the repository, I won't update PyPi package, so the last Py2 version of the `pyxtension` available at [PyPi](https://pypi.org/project/pyxtension/) will remain [`1.12.7`](https://pypi.org/project/pyxtension/1.12.7/)
 
-Starting with [`1.13.0`](https://pypi.org/project/pyxtension/1.13.0/) I've migrated the packaging & distributing method to [Wheel](https://pythonwheels.com/).
-      
 ## Installation
 ```
-pip install pyxtension
+pip install streamerate
 ```
 or from Github:
 ```
-git clone https://github.com/asuiu/pyxtension.git
-cd pyxtension
+git clone https://github.com/asuiu/streamerate.git
+cd streamerate
 python setup.py install
 ```
 or
 ```
-git submodule add https://github.com/asuiu/pyxtension.git
+git submodule add https://github.com/asuiu/streamerate.git
 ```
 
 ## Modules overview
-### Json.py
-##### Json
-A `dict` subclass to represent a Json object. You should be able to use this
-absolutely anywhere you can use a `dict`. While this is probably the class you
-want to use, there are a few caveats that follow from this being a `dict` under
-the hood.
 
-**Never again will you have to write code like this**:
-```python
-body = {
-    'query': {
-        'filtered': {
-            'query': {
-                'match': {'description': 'addictive'}
-            },
-            'filter': {
-                'term': {'created_by': 'ASU'}
-            }
-        }
-    }
-}
-```
-
-From now on, you may simply write the following three lines:
-```python
-body = Json()
-body.query.filtered.query.match.description = 'addictive'
-body.query.filtered.filter.term.created_by = 'ASU'
-```
 ### streams.py
 #### stream
 `stream` subclasses `collections.Iterable`. It's the same Python iterable, but with more added methods, suitable for multithreading and multiprocess processings.
 Used to create stream processing pipelines, similar to those used in [Scala](http://www.scala-lang.org/) and [MapReduce](https://en.wikipedia.org/wiki/MapReduce) programming model.
 Those who used [Apache Spark](http://spark.apache.org/) [RDD](http://spark.apache.org/docs/latest/programming-guide.html#rdd-operations) functions will find this model of processing very easy to use.
 
-### [streams](https://github.com/asuiu/pyxtension/blob/master/streams.py)
+### [streams](https://github.com/asuiu/streamerate/blob/master/streams.py)
 **Never again will you have to write code like this**:
 ```python
 > lst = xrange(1,6)
@@ -352,144 +327,11 @@ Inherits `streams.stream` and built-in `dict`, and keeps in memory the dict obje
 Inherits `streams.sdict` and adds functionality  of `collections.defaultdict` from stdlib
 
 
-### [Json](https://github.com/asuiu/pyxtension/blob/master/Json.py)
-
-[Json](https://github.com/asuiu/pyxtension/blob/master/Json.py) is a module that provides mapping objects that allow their elements to be accessed both as keys and as attributes:
-```python
-    > from pyxtension.Json import Json
-    > a = Json({'foo': 'bar'})
-    > a.foo
-    'bar'
-    > a['foo']
-    'bar'
-```
-
-Attribute access makes it easy to create convenient, hierarchical settings objects:
-```python
-    with open('settings.yaml') as fileobj:
-        settings = Json(yaml.safe_load(fileobj))
-
-    cursor = connect(**settings.db.credentials).cursor()
-
-    cursor.execute("SELECT column FROM table;")
-```
-
-### Basic Usage
-
-Json comes with two different classes, `Json`, and `JsonList`.
-Json is fairly similar to native `dict` as it extends it an is a mutable mapping that allow creating, accessing, and deleting key-value pairs as attributes.
-`JsonList` is similar to native `list` as it extends it and offers a way to transform the `dict` objects from inside also in `Json` instances.
-
-#### Construction
-###### Directly from a JSON string
-```python
-> Json('{"key1": "val1", "lst1": [1,2] }')
-{u'key1': u'val1', u'lst1': [1, 2]}
-```
-###### From `tuple`s:
-```python
-> Json( ('key1','val1'), ('lst1', [1,2]) )
-{'key1': 'val1', 'lst1': [1, 2]}
-# keep in mind that you should provide at least two tuples with key-value pairs
-```
-###### As a built-in `dict`
-```python
-> Json( [('key1','val1'), ('lst1', [1,2])] )
-{'key1': 'val1', 'lst1': [1, 2]}
-
-Json({'key1': 'val1', 'lst1': [1, 2]})
-{'key1': 'val1', 'lst1': [1, 2]}
-```
-#### Convert to a `dict`
-```python
-> json = Json({'key1': 'val1', 'lst1': [1, 2]})
-> json.toOrig()
-{'key1': 'val1', 'lst1': [1, 2]}
-```
-
-#### Valid Names
-
-Any key can be used as an attribute as long as:
-
-1. The key represents a valid attribute (i.e., it is a string comprised only of
-   alphanumeric characters and underscores that doesn't start with a number)
-2. The key does not shadow a class attribute (e.g., get).
-
-#### Attributes vs. Keys
-There is a minor difference between accessing a value as an attribute vs.
-accessing it as a key, is that when a dict is accessed as an attribute, it will
-automatically be converted to a `Json` object. This allows you to recursively
-access keys::
-```python
-    > attr = Json({'foo': {'bar': 'baz'}})
-    > attr.foo.bar
-    'baz'
-```
-Relatedly, by default, sequence types that aren't `bytes`, `str`, or `unicode`
-(e.g., `list`s, `tuple`s) will automatically be converted to `tuple`s, with any
-mappings converted to `Json`:
-```python
-    > attr = Json({'foo': [{'bar': 'baz'}, {'bar': 'qux'}]})
-    > for sub_attr in attr.foo:
-    >     print(sub_attr.bar)
-    'baz'
-    'qux'
-```
-To get this recursive functionality for keys that cannot be used as attributes,
-you can replicate the behavior by using dict syntax on `Json` object::
-```python
-> json = Json({1: {'two': 3}})
-> json[1].two
-3
-```
-`JsonList` usage examples:
-```
-> json = Json('{"lst":[1,2,3]}')
-> type(json.lst)
-<class 'pyxtension.Json.JsonList'>
-
-> json = Json('{"1":[1,2]}')
-> json["1"][1]
-2
-```
-
-
-Assignment as keys will still work::
-```python
-> json = Json({'foo': {'bar': 'baz'}})
-> json['foo']['bar'] = 'baz'
-> json.foo
-{'bar': 'baz'}
-```
-
-### frozendict
-`frozendict` is a simple immutable dictionary, where you can't change the internal variables of the class, and they are all immutable objects. Reinvoking `__init__` also doesn't alter the object.
-
-The API is the same as `dict`, without methods that can change the immutability. 
-
-`frozendict` is also hashable and can be used as keys for other dictionaries, of course with the condition that all values of the frozendict are also hashable.
-
-```python
->>> from pyxtension import frozendict
-
->>> fd = frozendict({"A": "B", "C": "D"})
->>> print(fd)
-{'A': 'B', 'C': 'D'}
-
->>> fd["A"] = "C"
-TypeError: object is immutable
-
->>> hash(fd)
--5063792767678978828
-```
-
 ### License
-pyxtension is released under a GNU Public license.
-The idea for [Json](https://github.com/asuiu/pyxtension/blob/master/Json.py) module was inspired from [addict](https://github.com/mewwts/addict) and [AttrDict](https://github.com/bcj/AttrDict),
-but it has a better performance with lower memory consumption.
+streamerate is released under MIT license.
 
 ### Alternatives
-There are other libraries that support Fluent Interface streams as alternatives to Pyxtension, but being much more poor in features for streaming:
+There are other libraries that support Fluent Interface streams as alternatives to streamerate, but being much more poor in features for streaming:
 - https://pypi.org/project/lazy-streams/
 - https://pypi.org/project/pystreams/
 - https://pypi.org/project/fluentpy/
@@ -498,4 +340,4 @@ There are other libraries that support Fluent Interface streams as alternatives 
 - https://github.com/sspipe/sspipe
 
 
-and something quite different from Fluent patterm, that makes kind of Piping: https://github.com/sspipe/sspipe and https://github.com/JulienPalard/Pipe
+and something quite different from Fluent pattern, that makes kind of Piping: https://github.com/sspipe/sspipe and https://github.com/JulienPalard/Pipe

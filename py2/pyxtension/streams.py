@@ -67,7 +67,19 @@ class MapException:
 
 
 class _IStream(collections.Iterable):
-    
+
+    def on_next(self, f):
+        '''
+        :param f:
+        :type f: (T) -> None
+        :return:
+        :rtype: stream
+        '''
+        def on_next_wrapper(f, entry):
+            f(entry)
+            return entry
+        return stream(ItrFromFunc(lambda: imap(lambda entry: on_next_wrapper(f, entry), self)))
+
     def for_each(self, f):
         '''
         :param f:
@@ -77,7 +89,7 @@ class _IStream(collections.Iterable):
         '''
         for entry in stream.toList(self):
             f(entry)
-    
+
     def map(self, f):
         '''
         :param f:

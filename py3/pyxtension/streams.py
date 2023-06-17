@@ -371,6 +371,12 @@ class _IStream(Iterable[_K], ABC):
                 if m_el not in st:
                     st.add(m_el)
                     yield el
+    
+    def on_next(self, f: Callable[[_K], None]) -> 'stream[_V]':
+        def on_next_wrapper(f, entry):
+            f(entry)
+            return entry
+        return stream(partial(map, lambda entry: on_next_wrapper(f, entry), self))
 
     def map(self, f: Callable[[_K], _V]) -> 'stream[_V]':
         return stream(partial(map, f, self))

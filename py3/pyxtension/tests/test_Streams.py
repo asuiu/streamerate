@@ -9,10 +9,9 @@ import unittest
 from functools import partial
 from io import BytesIO
 from multiprocessing import Pool
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
 from pydantic import validate_arguments, ValidationError
-
 from pyxtension.Json import Json, JsonList
 from pyxtension.streams import defaultstreamdict, sdict, slist, sset, stream, TqdmMapper
 
@@ -732,6 +731,16 @@ class StreamTestCase(unittest.TestCase):
         expected = set(i * i for i in xrange(N))
         self.assertSetEqual(res, expected)
         self.assertLessEqual(dt, 4)
+
+    def test_on_next_withOutTerminationFunction(self):
+        list_to_append_mock = Mock()
+        stream([1,2,3,4,5]).on_next(list_to_append_mock)
+        self.assertEqual(list_to_append_mock.call_count, 0)
+
+    def test_on_next_withTerminationFunction(self):
+        list_to_append_mock = Mock()
+        stream([1,2,3,4,5]).on_next(list_to_append_mock).toList()
+        self.assertEqual(list_to_append_mock.call_count, 5)
 
     def test_mpfastmap_time_with_sequential_mapping(self):
         N = self.N_processes

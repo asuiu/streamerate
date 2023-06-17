@@ -9,7 +9,7 @@ import unittest
 from functools import partial
 from io import BytesIO
 from multiprocessing import Pool
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
 from pydantic import validate_arguments, ValidationError
 
@@ -732,6 +732,11 @@ class StreamTestCase(unittest.TestCase):
         expected = set(i * i for i in xrange(N))
         self.assertSetEqual(res, expected)
         self.assertLessEqual(dt, 4)
+
+    def test_for_each(self):
+        mock = Mock()
+        stream([1,2,3,4,5]).for_each(mock)
+        self.assertEqual(mock.call_count, 5)
 
     def test_mpfastmap_time_with_sequential_mapping(self):
         N = self.N_processes

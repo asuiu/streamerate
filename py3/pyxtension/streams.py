@@ -372,6 +372,10 @@ class _IStream(Iterable[_K], ABC):
                     st.add(m_el)
                     yield el
 
+    def for_each(self, f: Callable[[_K], None]) -> 'None':
+        for entry in stream.toList(self):
+            f(entry)
+
     def map(self, f: Callable[[_K], _V]) -> 'stream[_V]':
         return stream(partial(map, f, self))
 

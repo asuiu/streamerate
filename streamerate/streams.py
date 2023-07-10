@@ -361,6 +361,11 @@ class _IStream(Iterable[_K], ABC):
                     st.add(m_el)
                     yield el
 
+    def __add_observer_generator(self, observer: Callable[[_K], None]) -> Iterator[_K]:
+        for el in self:
+            observer(el)
+            yield el
+
     def map(self, f: Callable[[_K], _V]) -> 'stream[_V]':
         return stream(partial(map, f, self))
 
@@ -520,6 +525,13 @@ class _IStream(Iterable[_K], ABC):
     def for_each(self, f: Callable[[_K], None]) -> None:
         for el in self:
             f(el)
+
+    def add_observer(self, f: Callable[[_K], None]) -> 'stream[_K]':
+        """
+        :param f: f is observer that will receive elements of self collection and return None
+        :return: will return stream of objects of the same type of elements from the stream
+        """
+        return stream(ItrFromFunc(lambda: self.__add_observer_generator(f)))
 
     def filter(self, predicate: Optional[Callable[[_K], bool]] = None) -> 'stream[_K]':
         """

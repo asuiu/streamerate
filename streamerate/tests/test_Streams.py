@@ -1134,7 +1134,23 @@ class StreamTestCase(unittest.TestCase):
         self.assertIsNone(result)
         self.assertListEqual(l, [0, 1, 2])
 
+    def test_add_observer_nominal(self):
+        l1 = []
+        l2 = []
+        s = stream(range(3)).add_observer(l1.append).add_observer(l2.append)
+        result = s.toList()
+        self.assertListEqual(l1, [0, 1, 2])
+        self.assertListEqual(l2, [0, 1, 2])
+        self.assertListEqual(result, [0, 1, 2])
 
+    def test_add_observer_reiterate(self):
+        l1 = []
+        s = stream(lambda: (i for i in xrange(3))).add_observer(l1.append)
+        result1 = s.toList()
+        # reiterate again on the same iterator to assure observers are initialized properly
+        result2 = s.toList()
+        self.assertListEqual(l1, [0, 1, 2, 0, 1, 2])
+        self.assertListEqual(result2, [0, 1, 2])
 
 """
 Allow for these test cases to be run from the command line

@@ -489,7 +489,6 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.mtmap(lambda el: f(*el), poolSize, bufferSize)
 
-    # ToDo - add fastFlatMap to Python 2.x version
     def fastFlatMap(self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC, poolSize: int = cpu_count(),
                     bufferSize: Optional[int] = None) -> 'stream[_V]':
         if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2 ** 12:
@@ -517,6 +516,10 @@ class _IStream(Iterable[_K], ABC):
         if id(predicate) == id(_IDENTITY_FUNC):
             return stream(ItrFromFunc(lambda: itertools.chain.from_iterable(self)))
         return stream(ItrFromFunc(lambda: itertools.chain.from_iterable(self.map(predicate))))
+
+    def for_each(self, f: Callable[[_K], None]) -> None:
+        for el in self:
+            f(el)
 
     def filter(self, predicate: Optional[Callable[[_K], bool]] = None) -> 'stream[_K]':
         """
@@ -773,7 +776,6 @@ class _IStream(Iterable[_K], ABC):
 
         return stream(lambda: stream(batch_gen(iter(self))))
 
-    # ToDo - add this fix to Python 2.7
     def take(self, n: int) -> 'stream[_K]':
         def gen(other_gen: GeneratorType, n):
             count = 0

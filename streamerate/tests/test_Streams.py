@@ -1127,6 +1127,13 @@ class StreamTestCase(unittest.TestCase):
         self.assertIsInstance(d, dict)
         self.assertDictEqual(d, {'a': 2, 3: 4})
 
+    def test_for_each_nominal(self):
+        l = []
+        s = stream(range(3))
+        result = s.for_each(l.append)
+        self.assertIsNone(result)
+        self.assertListEqual(l, [0, 1, 2])
+
 
 
 """

@@ -596,6 +596,56 @@ class _IStream(Iterable[_K], ABC):
         return slist(h.items())
 
     @staticmethod
+    def __order_key_func(order_fn: Callable[[_K], _T], x: Tuple[int, _K]):
+        return x[0] - order_fn(x[1])
+
+    @classmethod
+    def __group_consecutive_generator(cls, itr, order_fn: Callable[[_K], _T] = lambda x: x) -> 'Generator[Tuple[_T, stream[_K]],None,None]':
+        """
+        Produce groups of consecutive elements using itertools.groupby.
+        The function order_fn defines the consecutive logic by assigning a position to each element.
+        By default, order_fn is an identity function which works for consecutive numbers:
+
+        >>> numbers = stream([1, 10, 11, 12, 20, 30, 31, 32, 33, 40])
+        >>> for grp in numbers.group_consecutive():
+        ...     print(list(grp))
+        [1]
+        [10, 11, 12]
+        [20]
+        [30, 31, 32, 33]
+        [40]
+
+        To identify consecutive letters, use the index method from a string:
+
+        >>> from string import ascii_lowercase
+        >>> letters = stream('abcdfgilmnop')
+        >>> order_fn = ascii_lowercase.index
+        >>> for grp in letters.group_consecutive(order_fn):
+        ...     print(list(grp))
+        ['a', 'b', 'c', 'd']
+        ['f', 'g']
+        ['i']
+        ['l', 'm', 'n', 'o', 'p']
+
+        Note: Each group shares its source with the main iterable. To retain groups,
+        ensure to copy its elements, like storing in a list.
+
+        >>> numbers = stream([1, 2, 11, 12, 21, 22])
+        >>> stored_grps = [list(grp) for grp in numbers.group_consecutive()]
+        >>> stored_grps
+        [[1, 2], [11, 12], [21, 22]]
+
+        """
+
+        # key_fn = lambda x: x[0] - order_fn(x[1])
+        key_fn = partial(cls.__order_key_func, order_fn)
+        for _, group in groupby(enumerate(itr), key=key_fn):
+            yield stream(group).map(itemgetter(1))
+
+    def group_consecutive(self, order_fn: Callable[[_K], _T] = lambda x: x) -> 'stream[Tuple[_T, stream[_K]]]':
+        return stream(self.__group_consecutive_generator(self, order_fn))
+
+    @staticmethod
     def __stream_on_second_el(t: Tuple[_K, Iterable[_T]]) -> 'Tuple[_K, stream[_T]]':
         return t[0], stream(t[1])
 
@@ -1125,7 +1175,7 @@ class _PydanticValidated:
 
 
 class stream(_IStream, Iterable[_K], _PydanticValidated):
-    def __init__(self, itr: Optional[Union[Iterator[_K], Callable[[], Iterable[_K]]]] = None):
+    def __init__(self, itr: Optional[Union[Iterable[_K], Iterator[_K], Callable[[], Iterable[_K]]]] = None):
         self._itr, self._f = self._init_itr(itr)
 
     def __iter__(self) -> Iterator[_K]:

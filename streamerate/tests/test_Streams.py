@@ -8,6 +8,7 @@ import traceback
 import unittest
 from functools import partial
 from io import BytesIO
+from itertools import permutations
 from multiprocessing import Pool
 from unittest.mock import MagicMock
 
@@ -525,6 +526,34 @@ class StreamTestCase(unittest.TestCase):
             except StopIteration:
                 break
         self.assertListEqual(expected, [(0, [0, 1, 2]), (1, [3, 4, 5]), (2, [6, 7, 8]), (3, [9])])
+
+    def test_group_consecutive_numbers(self):
+        s = stream([-10, -8, -7, -6, 1, 2, 4, 5, -1, 7])
+        result = [list(g) for g in s.group_consecutive()]
+        self.assertEqual(result, [[-10], [-8, -7, -6], [1, 2], [4, 5], [-1], [7]])
+
+    def test_group_consecutive_string_as_numbers_ordering(self):
+        order_fn = lambda x: int(x)
+        s = stream(['1', '10', '11', '20', '21', '22', '30', '31'])
+        result = [list(g) for g in s.group_consecutive(order_fn)]
+        self.assertEqual(result, [['1'], ['10', '11'], ['20', '21', '22'], ['30', '31']])
+
+    def test_permutation_ordering(self):
+        order_fn = list(permutations('abcd')).index
+        s = stream([
+            ('a', 'b', 'c', 'd'),
+            ('a', 'c', 'b', 'd'),
+            ('a', 'c', 'd', 'b'),
+            ('a', 'd', 'b', 'c'),
+            ('d', 'b', 'c', 'a'),
+            ('d', 'c', 'a', 'b'),
+        ])
+        result = [list(g) for g in s.group_consecutive(order_fn)]
+        expected = [[('a', 'b', 'c', 'd')],
+                    [('a', 'c', 'b', 'd'), ('a', 'c', 'd', 'b'), ('a', 'd', 'b', 'c')],
+                    [('d', 'b', 'c', 'a'), ('d', 'c', 'a', 'b')],
+                    ]
+        self.assertEqual(result, expected)
 
     def test_fastFlatMap_nominal(self):
         s = stream([[1, 2], [3, 4], [4, 5]])

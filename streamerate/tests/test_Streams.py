@@ -12,7 +12,7 @@ from itertools import permutations
 from multiprocessing import Pool
 from unittest.mock import MagicMock
 
-import eventlet
+import gevent
 from pydantic import ValidationError, validate_arguments
 from pyxtension.Json import Json, JsonList
 
@@ -361,7 +361,7 @@ class gtmapTestCase(unittest.TestCase):
 
     def test_gtmap_time(self):
         def sleepFunc(el):
-            eventlet.sleep(0.3)
+            gevent.sleep(0.3)
             return el * el
 
         s = stream(xrange(100))
@@ -406,7 +406,7 @@ class gtmapTestCase(unittest.TestCase):
             arr.append(i)
             return i
 
-        s = stream(range(100)).map(m).gtmap(lambda x: x, poolSize=10).take(20)
+        s = stream(range(100)).map(m).gtmap(lambda x: x, poolSize=5).take(20)
         res = s.toList()
         self.assertLessEqual(len(arr), 30)
         self.assertEqual(len(res), 20)

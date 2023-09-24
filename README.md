@@ -2,7 +2,7 @@
 [![build Status](https://travis-ci.org/asuiu/streamerate.svg?branch=master)](https://travis-ci.org/asuiu/streamerate)
 [![Coverage Status](https://coveralls.io/repos/asuiu/streamerate/badge.svg?branch=master&service=github)](https://coveralls.io/github/asuiu/streamerate?branch=master)
 
-__[streamerate](https://github.com/asuiu/streamerate)__  is a powerful pure-Python library inspired by **[Fluent Interface pattern](https://en.wikipedia.org/wiki/Fluent_interface)** (used by Java 8 streams), providing a chainable and expressive approach to processing iterable data. 
+__[streamerate](https://github.com/asuiu/streamerate)__  is a powerful pure-Python library inspired by **[Fluent Interface pattern](https://en.wikipedia.org/wiki/Fluent_interface)** (used by Java 8 streams), providing a chainable and expressive approach to processing iterable data.
 
 
 By leveraging the **[Fluent Interface pattern](https://en.wikipedia.org/wiki/Fluent_interface)**, [streamerate](https://github.com/asuiu/streamerate) enables you to chain together multiple operations, such as filtering, mapping, and reducing, to create complex data processing pipelines with ease. With streamerate, you can write elegant and readable code that efficiently operates on streams of data, facilitating the development of clean and expressive Python applications.
@@ -12,8 +12,8 @@ __[streamerate](https://github.com/asuiu/streamerate)__ empowers you to write el
 
 The library is distributed under the permissive [MIT license](https://opensource.org/license/mit/), allowing you to freely use, modify, and distribute it in both open-source and commercial projects.
 
-*Note:* __[streamerate](https://github.com/asuiu/streamerate)__ originated as part of the [pyxtension](https://github.com/asuiu/pyxtension) project but has since been migrated as a standalone library.  
- 
+*Note:* __[streamerate](https://github.com/asuiu/streamerate)__ originated as part of the [pyxtension](https://github.com/asuiu/pyxtension) project but has since been migrated as a standalone library.
+
 
 ## Installation
 ```
@@ -73,11 +73,11 @@ word_counts = stream(corpus).\
 ```
 
 #### Basic methods
-###### **map(f)**
+##### **map(f)**
 Identic with builtin `map` but returns a stream
 
 
-###### **mpmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None)**
+##### **mpmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None)**
 Parallel ordered map using `multiprocessing.Pool.imap()`.
 
 It can replace the `map` when need to split computations to multiple cores, and order of results matters.
@@ -94,7 +94,7 @@ The elements in the result stream appears in the same order they appear in the i
 ```
 
 
-###### **mpfastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None)**
+##### **mpfastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None)**
 Parallel ordered map using `multiprocessing.Pool.imap_unordered()`.
 
 It can replace the `map` when the ordered of results doesn't matter.
@@ -111,7 +111,7 @@ The elements in the result stream appears in the unpredicted order.
 ```
 
 
-###### **fastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None)**
+##### **fastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None)**
 Parallel unordered map using multithreaded pool.
 It can replace the `map` when the ordered of results doesn't matter.
 
@@ -127,15 +127,15 @@ Because of CPython [GIL](https://wiki.python.org/moin/GlobalInterpreterLock) it'
 
 :rtype: `stream`
 
-###### **mtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None)**
-Parallel ordered map using multithreaded pool. 
+##### **mtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None)**
+Parallel ordered map using multithreaded pool.
 It can replace the `map` and the order of output stream will be the same as of the input.
 
 It spawns at most `poolSize` threads and applies the `f` function.
 
 The elements in the result stream appears in the **predicted** order.
 
-It won't take more than `bufferSize` elements from the input unless it was already required by output, so you can use it with `takeWhile` on infinite streams and not be afraid that it will continue work in background.  
+It won't take more than `bufferSize` elements from the input unless it was already required by output, so you can use it with `takeWhile` on infinite streams and not be afraid that it will continue work in background.
 
 Because of CPython [GIL](https://wiki.python.org/moin/GlobalInterpreterLock) it's most usefull for I/O or CPU intensive consuming native functions, or on Jython or IronPython interpreters.
 
@@ -143,8 +143,9 @@ Because of CPython [GIL](https://wiki.python.org/moin/GlobalInterpreterLock) it'
 
 :rtype: `stream`
 
+##### **gtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count())**
 
-###### **flatMap(predicate=_IDENTITY_FUNC)**
+##### **flatMap(predicate=_IDENTITY_FUNC)**
 :param predicate: is a function that will receive elements of self collection and return an iterable
 
 By default predicate is an identity function
@@ -159,15 +160,15 @@ stream([[1, 2], [3, 4], [4, 5]]).flatMap().toList() == [1, 2, 3, 4, 4, 5]
 ```
 
 
-###### **filter(predicate)**
+##### **filter(predicate)**
 identic with builtin filter, but returns stream
 
 
-###### **reversed()**
+##### **reversed()**
 returns reversed stream
 
 
-###### **exists(predicate)**
+##### **exists(predicate)**
 Tests whether a predicate holds for some of the elements of this sequence.
 
 :rtype: bool
@@ -179,7 +180,7 @@ stream([1, 2, 3]).exists(1) -> True
 ```
 
 
-###### **keyBy(keyfunc = _IDENTITY_FUNC)**
+##### **keyBy(keyfunc = _IDENTITY_FUNC)**
 Transforms stream of values to a stream of tuples (key, value)
 
 :param keyfunc: function to map values to keys
@@ -195,7 +196,7 @@ Example:
 stream([1, 2, 3, 4]).keyBy(lambda _:_ % 2) -> [(1, 1), (0, 2), (1, 3), (0, 4)]
 ```
 
-###### **groupBy()**
+##### **groupBy()**
 groupBy([keyfunc]) -> Make an iterator that returns consecutive keys and groups from the iterable.
 
 The iterable needs not to be sorted on the same key function, but the keyfunction need to return hasable objects.
@@ -213,7 +214,7 @@ Example:
 stream([1, 2, 3, 4]).groupBy(lambda _: _ % 2) -> [(0, [2, 4]), (1, [1, 3])]
 ```
 
-###### **countByValue()**
+##### **countByValue()**
 Returns a collections.Counter of values
 
 Example
@@ -221,98 +222,98 @@ Example
 stream(['a', 'b', 'a', 'b', 'c', 'd']).countByValue() == {'a': 2, 'b': 2, 'c': 1, 'd': 1}
 ```
 
-###### **distinct()**
+##### **distinct()**
 Returns stream of distinct values. Values must be hashable.
 ```python
 stream(['a', 'b', 'a', 'b', 'c', 'd']).distinct() == {'a', 'b', 'c', 'd'}
 ```
 
 
-###### **reduce(f, init=None)**
+##### **reduce(f, init=None)**
 same arguments with builtin reduce() function
 
 
-###### **toSet()**
+##### **toSet()**
 returns sset() instance
 
 
-###### **toList()**
+##### **toList()**
 returns slist() instance
 
 
-###### **toMap()**
+##### **toMap()**
 returns sdict() instance
 
 
-###### **sorted(key=None, cmp=None, reverse=False)**
+##### **sorted(key=None, cmp=None, reverse=False)**
 same arguments with builtin sorted()
 
 
-###### **size()**
+##### **size()**
 returns length of stream. Use carefully on infinite streams.
 
 
-###### **join(f)**
+##### **join(f)**
 Returns a string joined by f. Proivides same functionality as str.join() builtin method.
 
 if f is basestring, uses it to join the stream, else f should be a callable that returns a string to be used for join
 
 
-###### **mkString(f)**
+##### **mkString(f)**
 identic with join(f)
 
 
-###### **take(n)**
+##### **take(n)**
     returns first n elements from stream
 
 
-###### **head()**
+##### **head()**
     returns first element from stream
 
 
-###### **zip()**
+##### **zip()**
     the same behavior with itertools.izip()
 
-###### **unique(predicate=_IDENTITY_FUNC)**
+##### **unique(predicate=_IDENTITY_FUNC)**
     Returns a stream of unique (according to predicate) elements appearing in the same order as in original stream
 
     The items returned by predicate should be hashable and comparable.
 
 
 #### Statistics related methods
-###### **entropy()**
+##### **entropy()**
 calculates the Shannon entropy of the values from stream
 
 
-###### **pstddev()**
+##### **pstddev()**
 Calculates the population standard deviation.
 
 
-###### **mean()**
+##### **mean()**
 returns the arithmetical mean of the values
 
 
-###### **sum()**
+##### **sum()**
 returns the sum of elements from stream
 
 
-###### **min(key=_IDENTITY_FUNC)**
+##### **min(key=_IDENTITY_FUNC)**
 same functionality with builtin min() funcion
 
 
-###### **min_default(default, key=_IDENTITY_FUNC)**
+##### **min_default(default, key=_IDENTITY_FUNC)**
 same functionality with min() but returns :default: when called on empty streams
 
 
-###### **max()**
+##### **max()**
 same functionality with builtin max()
 
 
-###### **maxes(key=_IDENTITY_FUNC)**
+##### **maxes(key=_IDENTITY_FUNC)**
 returns a stream of max values from stream
 
 
-###### **mins(key=_IDENTITY_FUNC)**
+##### **mins(key=_IDENTITY_FUNC)**
 returns a stream of min values from stream
 
 

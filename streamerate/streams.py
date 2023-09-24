@@ -42,7 +42,7 @@ from typing import (
     overload,
 )
 
-from eventlet import GreenPool
+import gevent.pool
 from tblib import pickling_support
 from throttlex import Throttler
 from tqdm import tqdm
@@ -348,13 +348,13 @@ class _IStream(Iterable[_K], ABC):
         p.join()
 
     def __gt_pool_generator(self, f: Callable[[_K], _V], poolSize: int) -> Generator[_V, None, None]:
-        p = GreenPool(poolSize)
+        p = gevent.pool.Pool(size=poolSize)
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap(decorated_f_with_exc_passing, self):
             if isinstance(el, _MapException):
                 raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
             yield el
-        p.waitall()
+        p.join()
 
     def __mp_fast_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int) -> Generator[_V, None, None]:
         p = Pool(poolSize)
@@ -502,7 +502,7 @@ class _IStream(Iterable[_K], ABC):
 
     def gtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count()) -> "stream[_V]":
         """
-        Parallel ordered map using Green Threads (Greenlets) through the eventlet library.
+        Parallel ordered map using Green Threads (Greenlets) through the gevent library.
         :param poolSize: number of greenlets in Pool
         """
         if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
@@ -588,7 +588,7 @@ class _IStream(Iterable[_K], ABC):
 
     def reversed(self) -> "stream[_K]":
         try:
-            return stream(reversed(self))
+            return reversed(self)
         except AttributeError:
             return stream(lambda: reversed(self.toList()))
 
@@ -1247,7 +1247,7 @@ class stream(_IStream, Iterable[_K], _PydanticValidated):
             return str(self._itr)
         return object.__str__(self)
 
-    def __reversed__(self):
+    def __reversed__(self) -> "stream[_K]":
         try:
             return stream(reversed(self.__get_itr()))
         except TypeError:

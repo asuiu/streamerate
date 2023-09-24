@@ -1,3 +1,9 @@
+API
+===
+
+.. autosummary::
+   :toctree: generated
+
 :mod:`streamerate.streams` -- the main module with streams functionalities
 ===================================================
 

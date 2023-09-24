@@ -1,6 +1,8 @@
 # Author: ASU --<andrei.suiu@gmail.com>
 # Purpose: utility library for >=Python3.8
+# pylint: disable=too-many-lines
 import collections
+import copy
 import io
 import itertools
 import math
@@ -19,19 +21,38 @@ from operator import itemgetter
 from queue import Queue
 from random import shuffle
 from types import GeneratorType
-from typing import AbstractSet, Any, BinaryIO, Callable, Dict, Generator, Iterable, Iterator, List, Mapping, MutableSet, \
-    NamedTuple, Optional, overload, Set, Tuple, TypeVar, Union
+from typing import (
+    AbstractSet,
+    Any,
+    BinaryIO,
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    MutableSet,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+    overload,
+)
 
+from eventlet import GreenPool
 from tblib import pickling_support
 from throttlex import Throttler
 from tqdm import tqdm
 
-__author__ = 'andrei.suiu@gmail.com'
+__author__ = "andrei.suiu@gmail.com"
 
-_K = TypeVar('_K')
-_V = TypeVar('_V')
-_T = TypeVar('_T')
-_T_co = TypeVar('_T_co', covariant=True)
+_K = TypeVar("_K")
+_V = TypeVar("_V")
+_T = TypeVar("_T")
+_T_co = TypeVar("_T_co", covariant=True)
 
 _IDENTITY_FUNC: Callable[[_T], _T] = lambda _: _
 
@@ -41,8 +62,7 @@ class ItrFromFunc(Iterable[_K]):
         if callable(f):
             self._f = f
         else:
-            raise TypeError(
-                "Argument f to %s should be callable, but f.__class__=%s" % (str(self.__class__), str(f.__class__)))
+            raise TypeError(f"Argument f to {self.__class__!s} should be callable, but f.__class__={f.__class__!s}")
 
     def __iter__(self) -> Iterator[_T_co]:
         return iter(self._f())
@@ -63,7 +83,6 @@ class _QElement(NamedTuple):
 
 
 class TqdmMapper:
-
     def __init__(self, *args, **kwargs) -> None:
         """
         :param args: same args that are passed to tqdm
@@ -75,24 +94,21 @@ class TqdmMapper:
         self._tqdm.update()
         return el
 
+
 class _IStream(Iterable[_K], ABC):
+    # pylint: disable=too-many-public-methods
     @staticmethod
-    def _init_itr(itr: Optional[Union[Iterator[_K], Callable[[], Iterable[_K]]]] = None) -> Tuple[
-        Optional[Iterable[_K]],
-        Optional[Callable[[], Iterable[_K]]]
-    ]:
+    def _init_itr(itr: Optional[Union[Iterator[_K], Callable[[], Iterable[_K]]]] = None) -> Tuple[Optional[Iterable[_K]], Optional[Callable[[], Iterable[_K]]]]:
         _f = None
         if itr is None:
             _itr = []
-        elif isinstance(itr, (abc.Iterable, abc.Iterator)) or hasattr(itr, '__iter__') or hasattr(itr, '__getitem__'):
+        elif isinstance(itr, (abc.Iterable, abc.Iterator)) or hasattr(itr, "__iter__") or hasattr(itr, "__getitem__"):
             _itr = itr
         elif callable(itr):
             _f = itr
             _itr = None
         else:
-            raise TypeError(
-                "Argument f to _IStream should be callable or iterable, but itr.__class__=%s" % (
-                    str(itr.__class__)))
+            raise TypeError(f"Argument f to _IStream should be callable or iterable, but itr.__class__={itr.__class__!s}")
         return _itr, _f
 
     @staticmethod
@@ -105,7 +121,7 @@ class _IStream(Iterable[_K], ABC):
             try:
                 newEl = f(el)
                 qout.put(newEl)
-            except:
+            except Exception:  # pylint: disable=broad-except
                 qout.put(_MapException(sys.exc_info()))
 
     @staticmethod
@@ -123,7 +139,7 @@ class _IStream(Iterable[_K], ABC):
             try:
                 newEl = f(q_el.el)
                 qout.put(_QElement(q_el.i, newEl))
-            except:
+            except Exception:  # pylint: disable=broad-except
                 qout.put(_MapException(sys.exc_info()))
 
     @staticmethod
@@ -138,10 +154,11 @@ class _IStream(Iterable[_K], ABC):
                 newItr = f(itr)
                 for el in newItr:
                     qout.put(el)
-            except:
+            except Exception:  # pylint: disable=broad-except
                 qout.put(_MapException(sys.exc_info()))
 
     def __fastmap_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int):
+        # pylint: disable=too-many-branches
         qin = Queue(bufferSize)
         qout = Queue(max(bufferSize, poolSize + 1))  # max() is needed to not block when exiting
 
@@ -190,6 +207,7 @@ class _IStream(Iterable[_K], ABC):
                 t.join()
 
     def __mtmap_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int):
+        # pylint: disable=too-many-branches, too-many-statements
         qin = Queue(bufferSize)
         qout = Queue(max(bufferSize, poolSize + 1))  # max() is needed to not block when exiting
 
@@ -270,14 +288,12 @@ class _IStream(Iterable[_K], ABC):
             except StopIteration:
                 qin.put(_EndQueue())
                 return
-            else:
-                qin.put(el)
+            qin.put(el)
 
     def __fastFlatMap_generator(self, predicate, poolSize: int, bufferSize: int):
         qin = Queue(bufferSize)
         qout = Queue(bufferSize * 2)
-        threadPool = [threading.Thread(target=_IStream.__fastFlatMap_thread, args=(predicate, qin, qout)) for i in
-                      range(poolSize)]
+        threadPool = [threading.Thread(target=_IStream.__fastFlatMap_thread, args=(predicate, qin, qout)) for i in range(poolSize)]
         for t in threadPool:
             t.start()
         i = 0
@@ -317,7 +333,7 @@ class _IStream(Iterable[_K], ABC):
         """This decorates f to pass the exception traceback properly"""
         try:
             return f(el)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except,broad-exception-caught
             pickling_support.install(e)
             return _MapException(sys.exc_info())
 
@@ -331,8 +347,16 @@ class _IStream(Iterable[_K], ABC):
         p.close()
         p.join()
 
-    def __mp_fast_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int
-                                 ) -> Generator[_V, None, None]:
+    def __gt_pool_generator(self, f: Callable[[_K], _V], poolSize: int) -> Generator[_V, None, None]:
+        p = GreenPool(poolSize)
+        decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
+        for el in p.imap(decorated_f_with_exc_passing, self):
+            if isinstance(el, _MapException):
+                raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
+            yield el
+        p.waitall()
+
+    def __mp_fast_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int) -> Generator[_V, None, None]:
         p = Pool(poolSize)
         try:
             decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
@@ -366,33 +390,31 @@ class _IStream(Iterable[_K], ABC):
             observer(el)
             yield el
 
-    def map(self, f: Callable[[_K], _V]) -> 'stream[_V]':
+    def map(self, f: Callable[[_K], _V]) -> "stream[_V]":
         return stream(partial(map, f, self))
 
-    def starmap(self, f: Callable[[_K], _V]) -> 'stream[_V]':
+    def starmap(self, f: Callable[[_K], _V]) -> "stream[_V]":
         return stream(partial(itertools.starmap, f, self))
 
-    def mpmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(),
-              bufferSize: Optional[int] = 1) -> 'stream[_V]':
+    def mpmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
         """
         Parallel ordered map using multiprocessing.Pool.imap
         :param poolSize: number of processes in Pool
         :param bufferSize: passed as chunksize param to imap()
         """
         # Validations
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2 ** 12:
-            raise ValueError("poolSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
-        elif poolSize == 1:
+        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
+            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize}")
+        if poolSize == 1:
             return self.map(f)
         if bufferSize is None:
             bufferSize = poolSize * 2
-        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2 ** 12:
-            raise ValueError("bufferSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
+        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
+            raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
         return stream(self.__mp_pool_generator(f, poolSize, bufferSize))
 
-    def mpstarmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(),
-                  bufferSize: Optional[int] = 1) -> 'stream[_V]':
+    def mpstarmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
         :param poolSize: number of processes in Pool
@@ -400,22 +422,21 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.mpmap(partial(self._star_mapper, f), poolSize, bufferSize)
 
-    def mpfastmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(),
-                  bufferSize: Optional[int] = 1) -> 'stream[_V]':
+    def mpfastmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
         :param poolSize: number of processes in Pool
         :param bufferSize: passed as chunksize param to imap_unordered(), so it default to 1 as imap_unordered
         """
         # Validations
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2 ** 12:
-            raise ValueError("poolSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
-        elif poolSize == 1:
+        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
+            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+        if poolSize == 1:
             return self.map(f)
         if bufferSize is None:
             bufferSize = poolSize * 2
-        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2 ** 12:
-            raise ValueError("bufferSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
+        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
+            raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
         return stream(self.__mp_fast_pool_generator(f, poolSize, bufferSize))
 
@@ -423,8 +444,7 @@ class _IStream(Iterable[_K], ABC):
     def _star_mapper(f, el):
         return f(*el)
 
-    def mpfaststarmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(),
-                      bufferSize: Optional[int] = 1) -> 'stream[_V]':
+    def mpfaststarmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
         :param poolSize: number of processes in Pool
@@ -432,8 +452,7 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.mpfastmap(partial(_IStream._star_mapper, f), poolSize, bufferSize)
 
-    def fastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(),
-                bufferSize: Optional[int] = None) -> 'stream[_V]':
+    def fastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
         """
         Parallel unordered map using multithreaded pool.
         It spawns at most poolSize threads and applies the f function.
@@ -441,19 +460,18 @@ class _IStream(Iterable[_K], ABC):
         It's most usefull for I/O or CPU intensive consuming functions.
         :param poolSize: number of threads to spawn
         """
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2 ** 12:
-            raise ValueError("poolSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
-        elif poolSize == 1:
+        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
+            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+        if poolSize == 1:
             return self.map(f)
         if bufferSize is None:
             bufferSize = poolSize
-        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2 ** 12:
-            raise ValueError("bufferSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
+        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
+            raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
         return stream(ItrFromFunc(lambda: self.__fastmap_generator(f, poolSize, bufferSize)))
 
-    def faststarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(),
-                    bufferSize: Optional[int] = None) -> 'stream[_V]':
+    def faststarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
         """
         Parallel unordered starmap using multithreaded pool.
         It spawns at most poolSize threads and applies the f function.
@@ -463,8 +481,7 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.fastmap(lambda el: f(*el), poolSize, bufferSize)
 
-    def mtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(),
-              bufferSize: Optional[int] = None) -> 'stream[_V]':
+    def mtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
         """
         Parallel ORDERED map using multithreaded pool.
         It spawns at most poolSize threads and applies the f function.
@@ -472,19 +489,30 @@ class _IStream(Iterable[_K], ABC):
         It's most usefull for I/O or CPU intensive consuming functions.
         :param poolSize: number of threads to spawn
         """
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2 ** 12:
-            raise ValueError("poolSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
-        elif poolSize == 1:
+        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
+            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+        if poolSize == 1:
             return self.map(f)
         if bufferSize is None:
             bufferSize = poolSize
-        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2 ** 12:
-            raise ValueError("bufferSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
+        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
+            raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
         return stream(ItrFromFunc(lambda: self.__mtmap_generator(f, poolSize, bufferSize)))
 
-    def mtstarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(),
-                  bufferSize: Optional[int] = None) -> 'stream[_V]':
+    def gtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count()) -> "stream[_V]":
+        """
+        Parallel ordered map using Green Threads (Greenlets) through the eventlet library.
+        :param poolSize: number of greenlets in Pool
+        """
+        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
+            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+        if poolSize == 1:
+            return self.map(f)
+
+        return stream(ItrFromFunc(lambda: self.__gt_pool_generator(f, poolSize)))
+
+    def mtstarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
         """
         Parallel ORDERED map using multithreaded pool.
         It spawns at most poolSize threads and applies the f function.
@@ -494,25 +522,36 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.mtmap(lambda el: f(*el), poolSize, bufferSize)
 
-    def fastFlatMap(self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC, poolSize: int = cpu_count(),
-                    bufferSize: Optional[int] = None) -> 'stream[_V]':
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2 ** 12:
-            raise ValueError("poolSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
-        elif poolSize == 1:
+    def gtstarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count()) -> "stream[_V]":
+        """
+        Parallel ORDERED map using eventlet.Pool with Green threads.
+        It spawns at most poolSize green threads and applies the f function.
+        The elements in the result stream appears in the same order as at input.
+        It's usefull only for I/O intensive consuming functions (and please not that it has to use eventlet.sleep in order to benefit from green threads).
+        :param poolSize: number of threads to spawn
+        """
+        return self.gtmap(lambda el: f(*el), poolSize)
+
+    def fastFlatMap(
+        self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC, poolSize: int = cpu_count(), bufferSize: Optional[int] = None
+    ) -> "stream[_V]":
+        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
+            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+        if poolSize == 1:
             return self.flatMap(predicate)
         if bufferSize is None:
             bufferSize = poolSize
-        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2 ** 12:
-            raise ValueError("bufferSize should be an integer between 1 and 2^12. Received: %s" % str(poolSize))
+        if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
+            raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
         return stream(lambda: self.__fastFlatMap_generator(predicate, poolSize, bufferSize))
 
-    def map_stream(self, f: Callable[['_IStream[_K]'], _T]) -> _T:
+    def map_stream(self, f: Callable[["_IStream[_K]"], _T]) -> _T:
         return f(self)
 
-    def enumerate(self) -> 'stream[Tuple[int,_K]]':
+    def enumerate(self) -> "stream[Tuple[int,_K]]":
         return stream(zip(range(0, sys.maxsize), self))
 
-    def flatMap(self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC) -> 'stream[_V]':
+    def flatMap(self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC) -> "stream[_V]":
         """
         :param predicate: predicate is a function that will receive elements of self collection and return an iterable
             By default predicate is an identity function
@@ -526,20 +565,20 @@ class _IStream(Iterable[_K], ABC):
         for el in self:
             f(el)
 
-    def add_observer(self, f: Callable[[_K], None]) -> 'stream[_K]':
+    def add_observer(self, f: Callable[[_K], None]) -> "stream[_K]":
         """
         :param f: f is observer that will receive elements of self collection and return None
         :return: will return stream of objects of the same type of elements from the stream
         """
         return stream(ItrFromFunc(lambda: self.__add_observer_generator(f)))
 
-    def filter(self, predicate: Optional[Callable[[_K], bool]] = None) -> 'stream[_K]':
+    def filter(self, predicate: Optional[Callable[[_K], bool]] = None) -> "stream[_K]":
         """
         :param predicate: If predicate is None, return the items that are true.
         """
         return stream(ItrFromFunc(lambda: filter(predicate, self)))
 
-    def starfilter(self, predicate: Callable[[_K], bool]) -> 'stream[_K]':
+    def starfilter(self, predicate: Callable[[_K], bool]) -> "stream[_K]":
         """
         :param predicate:  Applies predicate unpacks the current item when calling predicate function.
             If predicate is None, returns the items that are true,
@@ -547,9 +586,9 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.filter(lambda el: predicate(*el))
 
-    def reversed(self) -> 'stream[_K]':
+    def reversed(self) -> "stream[_K]":
         try:
-            return stream(self.__reversed__())
+            return stream(reversed(self))
         except AttributeError:
             return stream(lambda: reversed(self.toList()))
 
@@ -562,28 +601,28 @@ class _IStream(Iterable[_K], ABC):
                 return True
         return False
 
-    def keyBy(self, keyfunc: Callable[[_K], _V] = _IDENTITY_FUNC) -> 'stream[Tuple[_K, _V]]':
+    def keyBy(self, keyfunc: Callable[[_K], _V] = _IDENTITY_FUNC) -> "stream[Tuple[_K, _V]]":
         """
         :param keyfunc: function to map values to keys
         :return: stream of Key, Value pairs
         """
         return self.map(lambda h: (keyfunc(h), h))
 
-    def keystream(self: 'stream[Tuple[_T,_V]]') -> 'stream[_T]':
+    def keystream(self: "stream[Tuple[_T,_V]]") -> "stream[_T]":
         """
         Applies only on streams of 2-uples
         :return: stream consisted of first element of tuples
         """
         return self.map(itemgetter(0))
 
-    def values(self: 'stream[Tuple[_T,_V]]') -> 'stream[_V]':
+    def values(self: "stream[Tuple[_T,_V]]") -> "stream[_V]":
         """
         Applies only on streams of 2-uples
         :return: stream consisted of second element of tuples
         """
         return self.map(itemgetter(1))
 
-    def groupBy(self, keyfunc: Callable[[_K], _T] = _IDENTITY_FUNC) -> 'slist[Tuple[_T, slist[_K]]]':
+    def groupBy(self, keyfunc: Callable[[_K], _T] = _IDENTITY_FUNC) -> "slist[Tuple[_T, slist[_K]]]":
         """
         groupBy([keyfunc]) -> Make a slist with consecutive keys and groups from the iterable.
         The iterable needs not to be sorted on the same key function, but the keyfunction need to return hashable objects.
@@ -600,7 +639,7 @@ class _IStream(Iterable[_K], ABC):
         return x[0] - order_fn(x[1])
 
     @classmethod
-    def __group_consecutive_generator(cls, itr, order_fn: Callable[[_K], _T] = lambda x: x) -> 'Generator[Tuple[_T, stream[_K]],None,None]':
+    def __group_consecutive_generator(cls, itr, order_fn: Callable[[_K], _T] = lambda x: x) -> "Generator[Tuple[_T, stream[_K]],None,None]":
         """
         Produce groups of consecutive elements using itertools.groupby.
         The function order_fn defines the consecutive logic by assigning a position to each element.
@@ -642,18 +681,18 @@ class _IStream(Iterable[_K], ABC):
         for _, group in groupby(enumerate(itr), key=key_fn):
             yield stream(group).map(itemgetter(1))
 
-    def group_consecutive(self, order_fn: Callable[[_K], _T] = lambda x: x) -> 'stream[Tuple[_T, stream[_K]]]':
+    def group_consecutive(self, order_fn: Callable[[_K], _T] = lambda x: x) -> "stream[Tuple[_T, stream[_K]]]":
         return stream(self.__group_consecutive_generator(self, order_fn))
 
     @staticmethod
-    def __stream_on_second_el(t: Tuple[_K, Iterable[_T]]) -> 'Tuple[_K, stream[_T]]':
+    def __stream_on_second_el(t: Tuple[_K, Iterable[_T]]) -> "Tuple[_K, stream[_T]]":
         return t[0], stream(t[1])
 
     @staticmethod
-    def __slist_on_second_el(t: Tuple[_K, Iterable[_T]]) -> 'Tuple[_K, slist[_T]]':
+    def __slist_on_second_el(t: Tuple[_K, Iterable[_T]]) -> "Tuple[_K, slist[_T]]":
         return t[0], slist(t[1])
 
-    def groupBySorted(self, keyfunc: Optional[Callable[[_K], _T]] = None) -> 'stream[Tuple[_T, stream[_K]]]':
+    def groupBySorted(self, keyfunc: Optional[Callable[[_K], _T]] = None) -> "stream[Tuple[_T, stream[_K]]]":
         """
         Make a stream of consecutive keys and groups (as streams) from the self.
         The iterable needs to already be sorted on the same key function.
@@ -662,7 +701,7 @@ class _IStream(Iterable[_K], ABC):
         """
         return stream(partial(groupby, iterable=self, key=keyfunc)).map(self.__stream_on_second_el)
 
-    def groupBySortedToList(self, keyfunc: Callable[[_K], _T] = _IDENTITY_FUNC) -> 'stream[Tuple[_T, slist[_K]]]':
+    def groupBySortedToList(self, keyfunc: Callable[[_K], _T] = _IDENTITY_FUNC) -> "stream[Tuple[_T, slist[_K]]]":
         """
         Make a stream of consecutive keys and groups (as streams) from the self.
         The iterable needs to already be sorted on the same key function.
@@ -671,7 +710,7 @@ class _IStream(Iterable[_K], ABC):
         """
         return stream(partial(groupby, iterable=self, key=keyfunc)).map(self.__slist_on_second_el)
 
-    def countByValue(self) -> 'sdict[_K,int]':
+    def countByValue(self) -> "sdict[_K,int]":
         return sdict(collections.Counter(self))
 
     @overload
@@ -697,27 +736,26 @@ class _IStream(Iterable[_K], ABC):
     def reduce(self, f, init=None):
         if init is None:
             return reduce(f, self)
-        else:
-            return reduce(f, self, init)
+        return reduce(f, self, init)
 
-    def transform(self, f: Callable[[Iterable[_K]], Iterable[_V]]) -> 'stream[_V]':
+    def transform(self, f: Callable[[Iterable[_K]], Iterable[_V]]) -> "stream[_V]":
         return stream(partial(f, self))
 
-    def shuffle(self, random=None) -> 'slist[_K]':
+    def shuffle(self, random=None) -> "slist[_K]":
         lst = self.toList()
-        shuffle(lst, random=random)
+        shuffle(lst, random=random)  # pylint: disable=deprecated-argument
         return lst
 
-    def toSet(self) -> 'sset[_K]':
+    def toSet(self) -> "sset[_K]":
         return sset(self)
 
-    def toList(self) -> 'slist[_K]':
+    def toList(self) -> "slist[_K]":
         return slist(self)
 
     def sorted(self, key=None, reverse=False):
         return slist(sorted(self, key=key, reverse=reverse))
 
-    def toMap(self: 'stream[Tuple[_T,_V]]') -> 'sdict[_T,_V]':
+    def toMap(self: "stream[Tuple[_T,_V]]") -> "sdict[_T,_V]":
         return sdict(self)
 
     to_list = toList
@@ -725,7 +763,7 @@ class _IStream(Iterable[_K], ABC):
     to_map = toMap
     to_dict = toMap
 
-    def toSumCounter(self: 'stream[Tuple[_T,_V]]') -> 'sdict[_T,_V]':
+    def toSumCounter(self: "stream[Tuple[_T,_V]]") -> "sdict[_T,_V]":
         """
         Elements should be tuples (T, V) where V can be summed
         :return: sdict on stream elements
@@ -740,7 +778,7 @@ class _IStream(Iterable[_K], ABC):
         return res
 
     @overload
-    def __getitem__(self, i: slice) -> 'stream[_K]':
+    def __getitem__(self, i: slice) -> "stream[_K]":
         ...
 
     @overload
@@ -750,20 +788,17 @@ class _IStream(Iterable[_K], ABC):
     def __getitem__(self, i: Union[slice, int]):
         if isinstance(i, slice):
             return self.__getslice(i.start, i.stop, i.step)
-        else:
-            tk = 0
-            while tk < i:
-                self.next()
-                tk += 1
-            return self.next()
+        tk = 0
+        while tk < i:
+            self.next()
+            tk += 1
+        return self.next()
 
-    def __getslice(self, start: Optional[int] = None,
-                   stop: Optional[int] = None,
-                   step: Optional[int] = None) -> 'stream[_K]':
+    def __getslice(self, start: Optional[int] = None, stop: Optional[int] = None, step: Optional[int] = None) -> "stream[_K]":
         # ToDo:fix this for cases where self._itr is generator from fastmap(), so have to be closed()
         return stream(lambda: itertools.islice(self, start, stop, step))
 
-    def __add__(self, other) -> 'stream[_K]':
+    def __add__(self, other) -> "stream[_K]":
         if not isinstance(other, (ItrFromFunc, stream)):
             othItr = stream(lambda: other)
         else:
@@ -776,7 +811,7 @@ class _IStream(Iterable[_K], ABC):
             i = ItrFromFunc(lambda: self._itr)
         return stream(partial(itertools.chain.from_iterable, (i, othItr)))
 
-    def __iadd__(self, other) -> 'stream[_K]':
+    def __iadd__(self, other) -> "stream[_K]":
         if not isinstance(other, (ItrFromFunc, stream)):
             othItr = stream(lambda: other)
         else:
@@ -800,27 +835,26 @@ class _IStream(Iterable[_K], ABC):
 
     def join(self, f: Callable[[_K], _V] = None) -> Union[_K, str]:
         if f is None:
-            return ''.join(self)
-        elif isinstance(f, str):
+            return "".join(self)
+        if isinstance(f, str):
             return f.join(self)
-        else:
-            itr = iter(self)
-            r = next(itr)
-            last = r
-            while True:
-                try:
-                    n = next(itr)
-                    r += f(last)
-                    last = n
-                    r += n
-                except StopIteration:
-                    break
-            return r
+        itr = iter(self)
+        r = next(itr)
+        last = r
+        while True:
+            try:
+                n = next(itr)
+                r += f(last)
+                last = n
+                r += n
+            except StopIteration:
+                break
+        return r
 
     def mkString(self, c) -> str:
         return self.join(c)
 
-    def batch(self, size: int) -> 'stream[slist[_K]]':
+    def batch(self, size: int) -> "stream[slist[_K]]":
         """
         :param size: size of batch
         It groups elements of stream into batches of size `size` and returns stream of batches which are slists
@@ -838,7 +872,7 @@ class _IStream(Iterable[_K], ABC):
 
         return stream(lambda: stream(batch_gen(iter(self))))
 
-    def take(self, n: int) -> 'stream[_K]':
+    def take(self, n: int) -> "stream[_K]":
         def gen(other_gen: GeneratorType, n):
             count = 0
             while count < n:
@@ -853,11 +887,9 @@ class _IStream(Iterable[_K], ABC):
 
         if isinstance(self._itr, GeneratorType):
             return stream(gen(self._itr, n))
-        else:
-            return self[:n]
+        return self[:n]
 
-    # ToDo: add tests for takeWhile
-    def takeWhile(self, predicate: Callable[[_K], bool]) -> 'stream[_K]':
+    def takeWhile(self, predicate: Callable[[_K], bool]) -> "stream[_K]":
         def gen(other_gen: Union[GeneratorType, Iterable[_K]], pred: Callable[[_K], bool]):
             isGen = True
             if not isinstance(other_gen, GeneratorType):
@@ -872,7 +904,8 @@ class _IStream(Iterable[_K], ABC):
                         break
                 except StopIteration:
                     break
-            if isGen: other_gen.close()
+            if isGen:
+                other_gen.close()
 
         return stream(gen(self, predicate))
 
@@ -892,7 +925,7 @@ class _IStream(Iterable[_K], ABC):
             self._f = None
             return next(self._itr)
 
-    def head(self, n: int) -> 'stream[_K]':
+    def head(self, n: int) -> "stream[_K]":
         "Return a stream over the first n items"
         return stream(itertools.islice(self, n))
 
@@ -909,26 +942,26 @@ class _IStream(Iterable[_K], ABC):
         "Count how many times the predicate is true"
         return sum(self.map(predicate))
 
-    def pad_with(self, pad: Any) -> 'stream[Union[Any,_K]]':
+    def pad_with(self, pad: Any) -> "stream[Union[Any,_K]]":
         """Returns the sequence elements and then returns None indefinitely.
 
         Useful for emulating the behavior of the built-in map() function.
         """
         return stream(itertools.chain(self, itertools.repeat(pad)))
 
-    def roundrobin(self) -> 'stream':
+    def roundrobin(self) -> "stream":
         """
         roundrobin('ABC', 'D', 'EF') --> A D E B F C
         Recipe credited to https://docs.python.org/3/library/itertools.html#itertools.chain.from_iterable
         """
 
-        def gen(s: 'stream'):
+        def gen(s: "stream"):
             num_active = s.size()
             nexts = itertools.cycle(iter(it).__next__ for it in s)
             while num_active:
                 try:
-                    for next in nexts:
-                        yield next()
+                    for _next in nexts:
+                        yield _next()
                 except StopIteration:
                     # Remove the iterator we just exhausted from the cycle.
                     num_active -= 1
@@ -952,13 +985,12 @@ class _IStream(Iterable[_K], ABC):
         except ValueError as e:
             if "empty sequence" in e.args[0]:
                 return default
-            else:
-                raise
+            raise
 
     def max(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> _V:
         return max(self, key=key)
 
-    def maxes(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> 'slist[_V]':
+    def maxes(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> "slist[_V]":
         i = iter(self)
         aMaxes = slist([next(i)])
         mval = key(aMaxes[0])
@@ -971,7 +1003,7 @@ class _IStream(Iterable[_K], ABC):
                 aMaxes.append(v)
         return aMaxes
 
-    def mins(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> 'slist[_V]':
+    def mins(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> "slist[_V]":
         i = iter(self)
         aMaxes = slist([next(i)])
         mval = key(aMaxes[0])
@@ -996,11 +1028,11 @@ class _IStream(Iterable[_K], ABC):
             sm += el
             n += 1
         if n < 1:
-            raise ValueError('Standard deviation requires at least one data point')
+            raise ValueError("Standard deviation requires at least one data point")
         mean = float(sm) / n
         ss = sum((x - mean) ** 2 for x in self)
         pvar = ss / n  # the population variance
-        return pvar ** 0.5
+        return pvar**0.5
 
     def mean(self) -> float:
         """Return the sample arithmetic mean of data. in one single pass"""
@@ -1010,13 +1042,13 @@ class _IStream(Iterable[_K], ABC):
             sm += el
             n += 1
         if n < 1:
-            raise ValueError('Mean requires at least one data point')
+            raise ValueError("Mean requires at least one data point")
         return sm / float(n)
 
-    def zip(self) -> 'stream[_V]':
+    def zip(self) -> "stream[_V]":
         return stream(zip(*(self.toList())))
 
-    def distinct(self, key: Optional[Callable[[_K], _V]] = None) -> 'stream[_K]':
+    def distinct(self, key: Optional[Callable[[_K], _V]] = None) -> "stream[_K]":
         """
         The stream items should be hashable and comparable.
         :param key: optional, maps the elements to comparable objects
@@ -1027,23 +1059,27 @@ class _IStream(Iterable[_K], ABC):
 
     unique = distinct
 
-    def tqdm(self, desc: Optional[str] = None,
-             total: Optional[int] = None,
-             leave: bool = True,
-             file: Optional[io.TextIOWrapper] = None,
-             ncols: Optional[int] = None,
-             mininterval: float = 0.1,
-             maxinterval: float = 10.0,
-             ascii: Optional[Union[str, bool]] = None,
-             unit: str = 'it',
-             unit_scale: Optional[Union[bool, int, float]] = False,
-             dynamic_ncols: Optional[bool] = False,
-             smoothing: Optional[float] = 0.3,
-             initial: int = 0,
-             position: Optional[int] = None,
-             postfix: Optional[dict] = None,
-             gui: bool = False,
-             **kwargs) -> 'stream[_K]':
+    # pylint: disable=too-many-arguments
+    def tqdm(
+        self,
+        desc: Optional[str] = None,
+        total: Optional[int] = None,
+        leave: bool = True,
+        file: Optional[io.TextIOWrapper] = None,
+        ncols: Optional[int] = None,
+        mininterval: float = 0.1,
+        maxinterval: float = 10.0,
+        ascii: Optional[Union[str, bool]] = None,  # pylint: disable=redefined-builtin
+        unit: str = "it",
+        unit_scale: Optional[Union[bool, int, float]] = False,
+        dynamic_ncols: Optional[bool] = False,
+        smoothing: Optional[float] = 0.3,
+        initial: int = 0,
+        position: Optional[int] = None,
+        postfix: Optional[dict] = None,
+        gui: bool = False,
+        **kwargs,
+    ) -> "stream[_K]":
         """
         :param desc: Prefix for the progressbar.
         :param total: The number of expected iterations. If unspecified,
@@ -1094,14 +1130,30 @@ class _IStream(Iterable[_K], ABC):
         :param kwargs: Params to be sent to tqdm()
         :return: self stream
         """
-        return stream(tqdm(iterable=self, desc=desc, total=total, leave=leave,
-                           file=file, ncols=ncols, mininterval=mininterval, maxinterval=maxinterval,
-                           ascii=ascii, unit=unit, unit_scale=unit_scale, dynamic_ncols=dynamic_ncols,
-                           smoothing=smoothing,
-                           initial=initial, position=position, postfix=postfix,
-                           gui=gui, **kwargs))
+        return stream(
+            tqdm(
+                iterable=self,
+                desc=desc,
+                total=total,
+                leave=leave,
+                file=file,
+                ncols=ncols,
+                mininterval=mininterval,
+                maxinterval=maxinterval,
+                ascii=ascii,
+                unit=unit,
+                unit_scale=unit_scale,
+                dynamic_ncols=dynamic_ncols,
+                smoothing=smoothing,
+                initial=initial,
+                position=position,
+                postfix=postfix,
+                gui=gui,
+                **kwargs,
+            )
+        )
 
-    def throttle(self, max_req: int, interval: float) -> 'stream[_K]':
+    def throttle(self, max_req: int, interval: float) -> "stream[_K]":
         """
         :param max_req: number of requests
         :param interval: period in number of seconds
@@ -1124,28 +1176,27 @@ class _IStream(Iterable[_K], ABC):
         return p + binaryData
 
     def dumpToPickle(self, fileStream):
-        '''
+        """
         :param fileStream: should be binary output stream
         :type fileStream: file
         :return: Nothing
-        '''
+        """
 
-        for el in self.map(lambda _: pickle.dumps(_, pickle.HIGHEST_PROTOCOL, fix_imports=True)).map(
-                stream.binaryToChunk):
+        for el in self.map(lambda _: pickle.dumps(_, pickle.HIGHEST_PROTOCOL, fix_imports=True)).map(stream.binaryToChunk):
             fileStream.write(el)
 
     def dumpPickledToWriter(self, writer: Callable[[bytes], _T]) -> None:
-        '''
+        """
         :param writer: should be binary output callable stream
-        '''
+        """
         for el in self:
-            writer(stream._picklePack(el))
+            writer(stream._picklePack(el))  # pylint: disable=protected-access
 
     @staticmethod
     def _picklePack(el) -> bytes:
         return stream.binaryToChunk(pickle.dumps(el, pickle.HIGHEST_PROTOCOL))
 
-    def exceptIndexes(self, *indexes: List[int]) -> 'stream[_K]':
+    def exceptIndexes(self, *indexes: List[int]) -> "stream[_K]":
         """
         Doesn't support negative indexes as the stream doesn't have a length
         :return: the stream with filtered out elements on <indexes> positions
@@ -1170,7 +1221,7 @@ class _PydanticValidated:
     @classmethod
     def _pydantic_validator(cls, v):
         if not isinstance(v, cls):
-            raise TypeError(f'{repr(v)} is of type {type(v)} but is expected to be of {cls}')
+            raise TypeError(f"{repr(v)} is of type {type(v)} but is expected to be of {cls}")
         return v
 
 
@@ -1184,20 +1235,17 @@ class stream(_IStream, Iterable[_K], _PydanticValidated):
     def __get_itr(self):
         if self._itr is not None:
             return self._itr
-        else:
-            return self._f()
+        return self._f()
 
     def __repr__(self):
         if isinstance(self._itr, list):
-            repr(self._itr)
-        else:
-            return object.__repr__(self)
+            return repr(self._itr)
+        return object.__repr__(self)
 
     def __str__(self):
         if isinstance(self._itr, list):
             return str(self._itr)
-        else:
-            return object.__str__(self)
+        return object.__str__(self)
 
     def __reversed__(self):
         try:
@@ -1207,6 +1255,7 @@ class stream(_IStream, Iterable[_K], _PydanticValidated):
 
     @staticmethod
     def __binaryChunksStreamGenerator(fs, format="<L", statHandler: Optional[Callable[[int, int], None]] = None):
+        # pylint: disable=redefined-builtin
         """
         :param fs:
         :type fs: file
@@ -1221,9 +1270,9 @@ class stream(_IStream, Iterable[_K], _PydanticValidated):
         sz = 0
         while True:
             s = fs.read(4)
-            if s == b'':
+            if s == b"":
                 return
-            elif len(s) != 4:
+            if len(s) != 4:
                 raise IOError("Wrong pickled file format")
             l = struct.unpack(format, s)[0]
             s = fs.read(l)
@@ -1233,17 +1282,16 @@ class stream(_IStream, Iterable[_K], _PydanticValidated):
                 statHandler((count, sz))
             yield s
 
+    # pylint: disable=redefined-builtin
     @staticmethod
-    def readFromBinaryChunkStream(readStream: BinaryIO,
-                                  format: str = "<L",
-                                  statHandler: Optional[Callable[[int, int], None]] = None) -> 'stream[_V]':
+    def readFromBinaryChunkStream(readStream: BinaryIO, format: str = "<L", statHandler: Optional[Callable[[int, int], None]] = None) -> "stream[_V]":
         """
         :param statHandler: statistics handler, will be called before every yield with a tuple (n,size)
         """
         return stream(stream.__binaryChunksStreamGenerator(readStream, format, statHandler))
 
     @staticmethod
-    def loadFromPickled(file: BinaryIO, format: str = "<L", statHandler: Optional[Callable[[int, int], None]] = None) -> 'stream[_V]':
+    def loadFromPickled(file: BinaryIO, format: str = "<L", statHandler: Optional[Callable[[int, int], None]] = None) -> "stream[_V]":
         """
         :param file: should be path or binary file stream
         :param format: format of the header
@@ -1293,9 +1341,9 @@ class AbstractSynchronizedBufferedStream(stream):
 
 
 class buffered_stream(AbstractSynchronizedBufferedStream):
-    def __init__(self, buffers: 'Iterable[Iterable[_T]]'):
+    def __init__(self, buffers: "Iterable[Iterable[_T]]"):
         self.__buffers = iter(buffers)
-        super(buffered_stream, self).__init__()
+        super().__init__()
 
     def _getNextBuffer(self) -> Iterable[_T]:
         try:
@@ -1316,37 +1364,37 @@ class sset(set, MutableSet[_K], _IStream):
         return set.__iter__(self)
 
     # Below methods enable chaining and lambda using
-    def update(self, *args, **kwargs) -> 'sset[_K]':
+    def update(self, *args, **kwargs) -> "sset[_K]":
         # ToDo: Add option to update with iterables, as set.update supports only other set
         set.update(self, *args, **kwargs)
         return self
 
-    def intersection_update(self, *args, **kwargs) -> 'sset[_K]':
+    def intersection_update(self, *args, **kwargs) -> "sset[_K]":
         set.intersection_update(self, *args, **kwargs)
         return self
 
-    def difference_update(self, *args, **kwargs) -> 'sset[_K]':
+    def difference_update(self, *args, **kwargs) -> "sset[_K]":
         set.difference_update(self, *args, **kwargs)
         return self
 
-    def symmetric_difference_update(self, *args, **kwargs) -> 'sset[_K]':
-        super(sset, self).symmetric_difference_update(*args, **kwargs)
+    def symmetric_difference_update(self, *args, **kwargs) -> "sset[_K]":
+        super().symmetric_difference_update(*args, **kwargs)
         return self
 
-    def clear(self, *args, **kwargs) -> 'sset[_K]':
+    def clear(self, *args, **kwargs) -> "sset[_K]":
         set.clear(self, *args, **kwargs)
         return self
 
-    def remove(self, *args, **kwargs) -> 'sset[_K]':
-        super(sset, self).remove(*args, **kwargs)
+    def remove(self, *args, **kwargs) -> "sset[_K]":
+        super().remove(*args, **kwargs)
         return self
 
-    def add(self, *args, **kwargs) -> 'sset[_K]':
-        super(sset, self).add(*args, **kwargs)
+    def add(self, *args, **kwargs) -> "sset[_K]":
+        super().add(*args, **kwargs)
         return self
 
-    def discard(self, *args, **kwargs) -> 'sset[_K]':
-        super(sset, self).discard(*args, **kwargs)
+    def discard(self, *args, **kwargs) -> "sset[_K]":
+        super().discard(*args, **kwargs)
         return self
 
     def __reversed__(self):
@@ -1358,16 +1406,48 @@ class sset(set, MutableSet[_K], _IStream):
     def union(self, *s: Iterable[_K]) -> Set[_K]:
         return sset(super().union(*s))
 
-    def tqdm(self, desc: Optional[str] = None, total: Optional[int] = None, leave: bool = True,
-             file: Optional[io.TextIOWrapper] = None, ncols: Optional[int] = None, mininterval: float = 0.1,
-             maxinterval: float = 10.0, ascii: Optional[Union[str, bool]] = None, unit: str = 'it',
-             unit_scale: Optional[Union[bool, int, float]] = False, dynamic_ncols: Optional[bool] = False,
-             smoothing: Optional[float] = 0.3, initial: int = 0, position: Optional[int] = None,
-             postfix: Optional[dict] = None, gui: bool = False, **kwargs) -> 'stream[_K]':
+    # pylint: disable=too-many-arguments
+    def tqdm(
+        self,
+        desc: Optional[str] = None,
+        total: Optional[int] = None,
+        leave: bool = True,
+        file: Optional[io.TextIOWrapper] = None,
+        ncols: Optional[int] = None,
+        mininterval: float = 0.1,
+        maxinterval: float = 10.0,
+        ascii: Optional[Union[str, bool]] = None,  # pylint: disable=redefined-builtin
+        unit: str = "it",
+        unit_scale: Optional[Union[bool, int, float]] = False,
+        dynamic_ncols: Optional[bool] = False,
+        smoothing: Optional[float] = 0.3,
+        initial: int = 0,
+        position: Optional[int] = None,
+        postfix: Optional[dict] = None,
+        gui: bool = False,
+        **kwargs,
+    ) -> "stream[_K]":
         if total is None:
             total = self.size()
-        return super().tqdm(desc, total, leave, file, ncols, mininterval, maxinterval, ascii, unit, unit_scale,
-                            dynamic_ncols, smoothing, initial, position, postfix, gui, **kwargs)
+        return super().tqdm(
+            desc,
+            total,
+            leave,
+            file,
+            ncols,
+            mininterval,
+            maxinterval,
+            ascii,
+            unit,
+            unit_scale,
+            dynamic_ncols,
+            smoothing,
+            initial,
+            position,
+            postfix,
+            gui,
+            **kwargs,
+        )
 
     def __and__(self, other):
         return sset(super().__and__(other))
@@ -1396,29 +1476,28 @@ class slist(List[_K], stream):
     def __init__(self, *args, **kwrds):
         list.__init__(self, *args, **kwrds)
 
-    def __getitem__(self, item) -> 'Union[_K,slist[_K]]':
+    def __getitem__(self, item) -> "Union[_K,slist[_K]]":
         if isinstance(item, slice):
             return slist(list.__getitem__(self, item))
-        else:
-            return list.__getitem__(self, item)
+        return list.__getitem__(self, item)
 
-    def extend(self, iterable: Iterable[_K]) -> 'slist[_K]':
+    def extend(self, iterable: Iterable[_K]) -> "slist[_K]":
         list.extend(self, iterable)
         return self
 
-    def append(self, x) -> 'slist[_K]':
+    def append(self, x) -> "slist[_K]":
         list.append(self, x)
         return self
 
-    def remove(self, x) -> 'slist[_K]':
+    def remove(self, x) -> "slist[_K]":
         list.remove(self, x)
         return self
 
-    def insert(self, i, x) -> 'slist[_K]':
+    def insert(self, i, x) -> "slist[_K]":
         list.insert(self, i, x)
         return self
 
-    def exceptIndexes(self, *indexes: List[int]) -> 'stream[_K]':
+    def exceptIndexes(self, *indexes: List[int]) -> "stream[_K]":
         """
         Supports negative indexes
         :type indexes: list[int]
@@ -1426,7 +1505,7 @@ class slist(List[_K], stream):
         :rtype: stream [ T ]
         """
 
-        def indexIgnorer(indexSet: frozenset, _stream: 'stream[_K]'):
+        def indexIgnorer(indexSet: frozenset, _stream: "stream[_K]"):
             i = 0
             for el in _stream:
                 if i not in indexSet:
@@ -1437,7 +1516,7 @@ class slist(List[_K], stream):
         indexSet = frozenset(stream(indexes).map(lambda i: i if i >= 0 else i + sz))
         return stream(lambda: indexIgnorer(indexSet, self))
 
-    def __iadd__(self, other) -> 'stream[_K]':
+    def __iadd__(self, other) -> "stream[_K]":
         list.__iadd__(self, other)
         return self
 
@@ -1446,16 +1525,48 @@ class slist(List[_K], stream):
             return stream(self) + x
         return slist(super().__add__(x))
 
-    def tqdm(self, desc: Optional[str] = None, total: Optional[int] = None, leave: bool = True,
-             file: Optional[io.TextIOWrapper] = None, ncols: Optional[int] = None, mininterval: float = 0.1,
-             maxinterval: float = 10.0, ascii: Optional[Union[str, bool]] = None, unit: str = 'it',
-             unit_scale: Optional[Union[bool, int, float]] = False, dynamic_ncols: Optional[bool] = False,
-             smoothing: Optional[float] = 0.3, initial: int = 0, position: Optional[int] = None,
-             postfix: Optional[dict] = None, gui: bool = False, **kwargs) -> 'stream[_K]':
+    # pylint: disable=too-many-arguments
+    def tqdm(
+        self,
+        desc: Optional[str] = None,
+        total: Optional[int] = None,
+        leave: bool = True,
+        file: Optional[io.TextIOWrapper] = None,
+        ncols: Optional[int] = None,
+        mininterval: float = 0.1,
+        maxinterval: float = 10.0,
+        ascii: Optional[Union[str, bool]] = None,  # pylint: disable=redefined-builtin
+        unit: str = "it",
+        unit_scale: Optional[Union[bool, int, float]] = False,
+        dynamic_ncols: Optional[bool] = False,
+        smoothing: Optional[float] = 0.3,
+        initial: int = 0,
+        position: Optional[int] = None,
+        postfix: Optional[dict] = None,
+        gui: bool = False,
+        **kwargs,
+    ) -> "stream[_K]":
         if total is None:
             total = self.size()
-        return super().tqdm(desc, total, leave, file, ncols, mininterval, maxinterval, ascii, unit, unit_scale,
-                            dynamic_ncols, smoothing, initial, position, postfix, gui, **kwargs)
+        return super().tqdm(
+            desc,
+            total,
+            leave,
+            file,
+            ncols,
+            mininterval,
+            maxinterval,
+            ascii,
+            unit,
+            unit_scale,
+            dynamic_ncols,
+            smoothing,
+            initial,
+            position,
+            postfix,
+            gui,
+            **kwargs,
+        )
 
 
 class sdict(Dict[_K, _V], dict, _IStream):
@@ -1481,23 +1592,55 @@ class sdict(Dict[_K, _V], dict, _IStream):
     def items(self) -> stream[Tuple[_K, _V]]:
         return stream(dict.items(self))
 
-    def update(self, other=None, **kwargs) -> 'sdict[_K,_V]':
+    def update(self, other=None, **kwargs) -> "sdict[_K,_V]":
         dict.update(self, other, **kwargs)
         return self
 
-    def copy(self) -> 'sdict[_K,_V]':
+    def copy(self) -> "sdict[_K,_V]":
         return sdict(self.items())
 
-    def tqdm(self, desc: Optional[str] = None, total: Optional[int] = None, leave: bool = True,
-             file: Optional[io.TextIOWrapper] = None, ncols: Optional[int] = None, mininterval: float = 0.1,
-             maxinterval: float = 10.0, ascii: Optional[Union[str, bool]] = None, unit: str = 'it',
-             unit_scale: Optional[Union[bool, int, float]] = False, dynamic_ncols: Optional[bool] = False,
-             smoothing: Optional[float] = 0.3, initial: int = 0, position: Optional[int] = None,
-             postfix: Optional[dict] = None, gui: bool = False, **kwargs) -> 'stream[_K]':
+    # pylint: disable=too-many-arguments
+    def tqdm(
+        self,
+        desc: Optional[str] = None,
+        total: Optional[int] = None,
+        leave: bool = True,
+        file: Optional[io.TextIOWrapper] = None,
+        ncols: Optional[int] = None,
+        mininterval: float = 0.1,
+        maxinterval: float = 10.0,
+        ascii: Optional[Union[str, bool]] = None,  # pylint: disable=redefined-builtin
+        unit: str = "it",
+        unit_scale: Optional[Union[bool, int, float]] = False,
+        dynamic_ncols: Optional[bool] = False,
+        smoothing: Optional[float] = 0.3,
+        initial: int = 0,
+        position: Optional[int] = None,
+        postfix: Optional[dict] = None,
+        gui: bool = False,
+        **kwargs,
+    ) -> "stream[_K]":
         if total is None:
             total = self.size()
-        return super().tqdm(desc, total, leave, file, ncols, mininterval, maxinterval, ascii, unit, unit_scale,
-                            dynamic_ncols, smoothing, initial, position, postfix, gui, **kwargs)
+        return super().tqdm(
+            desc,
+            total,
+            leave,
+            file,
+            ncols,
+            mininterval,
+            maxinterval,
+            ascii,
+            unit,
+            unit_scale,
+            dynamic_ncols,
+            smoothing,
+            initial,
+            position,
+            postfix,
+            gui,
+            **kwargs,
+        )
 
 
 class defaultstreamdict(sdict):
@@ -1505,25 +1648,23 @@ class defaultstreamdict(sdict):
     def _itr(self):
         return ItrFromFunc(lambda: iter(self))
 
+    # pylint: disable=keyword-arg-before-vararg
     def __init__(self, default_factory=None, *a, **kw):
-        if (default_factory is not None and
-                not callable(default_factory)):
-            raise TypeError('first argument must be callable')
-        super(self.__class__, self).__init__(*a, **kw)
+        if default_factory is not None and not callable(default_factory):
+            raise TypeError("first argument must be callable")
+        super().__init__(*a, **kw)
         if default_factory is None:
-            self.__default_factory = lambda: object()
+            self.__default_factory = object
         else:
             self.__default_factory = default_factory
 
     def __getitem__(self, key: _K) -> _V:
         try:
-            return super(self.__class__, self).__getitem__(key)
+            return super().__getitem__(key)
         except KeyError:
             return self.__missing__(key)
 
     def __missing__(self, key):
-        # if self.__default_factory is None:
-        #     raise KeyError(key)
         self[key] = value = self.__default_factory()
         return value
 
@@ -1536,19 +1677,16 @@ class defaultstreamdict(sdict):
         return type(self), args, None, None, iter(itms)
 
     def copy(self) -> Mapping[_K, _V]:
-        return self.__copy__()
+        return self.__copy__()  # pylint: disable=unnecessary-dunder-call
 
     def __copy__(self):
         return type(self)(self.__default_factory, self)
 
     def __deepcopy__(self, memo):
-        import copy
-        return type(self)(self.__default_factory,
-                          copy.deepcopy(list(self.items())))
+        return type(self)(self.__default_factory, copy.deepcopy(list(self.items())))
 
     def __repr__(self) -> str:
-        return 'defaultdict(%s, %s)' % (self.__default_factory,
-                                        super(self.__class__, self).__repr__())
+        return f"defaultdict({self.__default_factory!s}, {super(self.__class__, self)!r})"
 
     def __str__(self) -> str:
         return dict.__str__(self)
@@ -1563,7 +1701,7 @@ def sfilter(f, itr: Iterable[_K]) -> stream[_K]:
 
 
 def iter_except(func: Callable[[], _K], exc: Exception, first: Optional[Callable[[], _K]] = None) -> _K:
-    """ Call a function repeatedly until an exception is raised.
+    """Call a function repeatedly until an exception is raised.
 
     Converts a call-until-exception interface to an iterator interface.
     Like builtins.iter(func, sentinel) but uses an exception instead

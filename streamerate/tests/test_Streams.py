@@ -441,6 +441,89 @@ class gtmapTestCase(unittest.TestCase):
         self.fail("No expected exceptions has been raised")
 
 
+class gtfastmapTestCase(unittest.TestCase):
+    def test_gtfastmap_nominal(self):
+        s = stream(xrange(100))
+        res = s.gtfastmap(_rnd_sleep, poolSize=8).toSet()
+        expected = {i * i for i in xrange(100)}
+        self.assertSetEqual(res, expected)
+
+    def test_gtfastmap_time(self):
+        def sleepFunc(el):
+            gevent.sleep(0.3)
+            return el * el
+
+        s = stream(xrange(100))
+        t1 = time.time()
+        res = s.gtfastmap(sleepFunc, poolSize=50).toSet()
+        dt = time.time() - t1
+        expected = set(i * i for i in xrange(100))
+        self.assertSetEqual(res, expected)
+        self.assertLessEqual(dt, 1.5)
+
+    def test_gtfastmap_reiteration(self):
+        l = stream(lambda: (xrange(i) for i in xrange(5))).gtfastmap(len)
+        self.assertSetEqual(l.toSet(), {0, 1, 2, 3, 4})
+        self.assertSetEqual(l.toSet(), {0, 1, 2, 3, 4})
+
+    def test_gtfastmap_one_el(self):
+        s = stream([1])
+        res = s.gtfastmap(lambda x: x * x, poolSize=4).toList()
+        expected = [1]
+        self.assertListEqual(res, expected)
+
+    def test_gtfastmap_no_el(self):
+        s = stream([])
+        res = s.gtfastmap(lambda x: x * x, poolSize=4).toList()
+        expected = []
+        self.assertListEqual(res, expected)
+
+    def test_gtfastmap_None_el(self):
+        s = stream([None])
+        res = s.gtfastmap(lambda x: x, poolSize=4).toList()
+        expected = [None]
+        self.assertListEqual(res, expected)
+
+    def test_gtfastmap_take_less(self):
+        arr = []
+
+        def m(i):
+            arr.append(i)
+            return i
+
+        _ = stream(range(100)).map(m).gtfastmap(lambda x: x, poolSize=5).take(20).toList()
+        self.assertLessEqual(len(arr), 30)
+
+    def test_gtfastmap_raises_exception(self):
+        s = stream([None])
+        with self.assertRaises(TypeError):
+            _ = s.gtfastmap(lambda x: x * x, poolSize=4).toSet()
+
+    def test_traceback_right_when_gtfastmap_raises_custom_exception(self):
+        s = stream([None])
+        try:
+            s.gtfastmap(PICKABLE_FUNCTION_RAISES, poolSize=4).toSet()
+        except SomeCustomException as e:
+            line = traceback.TracebackException.from_exception(e).stack[5].line
+            self.assertEqual(line, 'raise SomeCustomException("")')
+            return
+        self.fail("No expected exceptions has been raised")
+
+    def test_traceback_right_when_gtfastmap_raises_builtin_exception(self):
+        s = stream([None])
+
+        def f(x):
+            return x * x
+
+        try:
+            s.gtfastmap(f, poolSize=4).toSet()
+        except TypeError as e:
+            line = traceback.TracebackException.from_exception(e).stack[5].line
+            self.assertEqual(line, "return x * x")
+            return
+        self.fail("No expected exceptions has been raised")
+
+
 class mtmapTestCase(unittest.TestCase):
     def test_mtmap_nominal(self):
         s = stream(xrange(100))
@@ -1178,9 +1261,11 @@ class StreamTestCase(unittest.TestCase):
         s = stream([1, 2, 3])
         self.assertListEqual(s.reversed().toList(), [3, 2, 1])
 
-    def test_reverse_iterable(self):
+    def test_reverse_iterable_reiterate(self):
         s = stream(range(1, 4))
-        self.assertListEqual(s.reversed().toList(), [3, 2, 1])
+        _ = s.reversed().toList()
+        rev = s.reversed().toList()
+        self.assertListEqual(rev, [3, 2, 1])
 
     def test_reversedIterator(self):
         s = stream(iter(range(1, 4)))

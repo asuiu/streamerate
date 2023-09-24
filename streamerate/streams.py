@@ -356,6 +356,15 @@ class _IStream(Iterable[_K], ABC):
             yield el
         p.join()
 
+    def __gt_fast_pool_generator(self, f: Callable[[_K], _V], poolSize: int) -> Generator[_V, None, None]:
+        p = gevent.pool.Pool(size=poolSize)
+        decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
+        for el in p.imap_unordered(decorated_f_with_exc_passing, self):
+            if isinstance(el, _MapException):
+                raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
+            yield el
+        p.join()
+
     def __mp_fast_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int) -> Generator[_V, None, None]:
         p = Pool(poolSize)
         try:
@@ -502,7 +511,11 @@ class _IStream(Iterable[_K], ABC):
 
     def gtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count()) -> "stream[_V]":
         """
-        Parallel ordered map using Green Threads (Greenlets) through the gevent library.
+        Applies a given function to each item in the stream in parallel using Green Threads, provided by the gevent library.
+        This method offers a way to parallelize operations without the overhead of traditional threading or multiprocessing,
+            making it efficient for I/O-bound tasks.
+        The output order is guaranteed to be the same as the input order.
+
         :param poolSize: number of greenlets in Pool
         """
         if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
@@ -511,6 +524,22 @@ class _IStream(Iterable[_K], ABC):
             return self.map(f)
 
         return stream(ItrFromFunc(lambda: self.__gt_pool_generator(f, poolSize)))
+
+    def gtfastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count()) -> "stream[_V]":
+        """
+        Applies a given function to each item in the stream in parallel using Green Threads, provided by the gevent library.
+        This method offers a way to parallelize operations without the overhead of traditional threading or multiprocessing,
+            making it efficient for I/O-bound tasks.
+        The output order is NOT guaranteed to be the same as the input order, which makes it faster than gtmap.
+
+        :param poolSize: number of greenlets in Pool
+        """
+        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
+            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+        if poolSize == 1:
+            return self.map(f)
+
+        return stream(ItrFromFunc(lambda: self.__gt_fast_pool_generator(f, poolSize)))
 
     def mtstarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
         """
@@ -588,7 +617,7 @@ class _IStream(Iterable[_K], ABC):
 
     def reversed(self) -> "stream[_K]":
         try:
-            return reversed(self)
+            return reversed(self)  # pylint: disable=bad-reversed-sequence
         except AttributeError:
             return stream(lambda: reversed(self.toList()))
 

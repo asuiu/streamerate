@@ -822,9 +822,6 @@ class StarmapsTestCase(unittest.TestCase):
 
 
 class StreamTestCase(unittest.TestCase):
-    # def setUp(self):
-    #     self.s =
-
     def test_fastFlatMap_reiteration(self):
         l = stream(lambda: (xrange(i) for i in xrange(5))).fastFlatMap()
         self.assertListEqual(sorted(l.toList()), sorted([0, 0, 1, 0, 1, 2, 0, 1, 2, 3]))
@@ -1150,6 +1147,32 @@ class StreamTestCase(unittest.TestCase):
         u = s.distinct()
         self.assertListEqual(u.toList(), [0, 1, 2, 3])
         self.assertListEqual(u.toList(), [0, 1, 2, 3])
+
+    def test_product_nominal(self):
+        s = stream([{1, 2}, (3, 4, 5), [6]])
+        cartesian = s.product().toList()
+        self.assertListEqual(cartesian, [(1, 3, 6), (1, 4, 6), (1, 5, 6), (2, 3, 6), (2, 4, 6), (2, 5, 6)])
+
+    def test_product_repeat(self):
+        s = stream([1, 2, 3])
+        cartesian = s.product(repeat=2).toList()
+        self.assertListEqual(cartesian, [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3), (3, 1), (3, 2), (3, 3)])
+
+    def test_product_empty_stream(self):
+        s = stream([])
+        emptry_cartesian = s.product().toList()
+        self.assertListEqual(emptry_cartesian, [()])
+
+    def test_product_not_iterable_elements(self):
+        s = stream([1, 2, 3])
+        with self.assertRaises(TypeError):
+            s.product().toList()
+
+    def test_product_from_iterator(self):
+        s = stream(lambda: (i for i in range(2))).product(2)
+        _ = s.toList()
+        cartesian = s.toList()
+        self.assertListEqual(cartesian, [(0, 0), (0, 1), (1, 0), (1, 1)])
 
     def test_pstddev_nominal(self):
         s = stream([1, 2, 3, 4])

@@ -232,6 +232,20 @@ stream(['a', 'b', 'a', 'b', 'c', 'd']).distinct() == {'a', 'b', 'c', 'd'}
 ##### **reduce(f, init=None)**
 same arguments with builtin reduce() function
 
+##### **throttle(max_req: int, interval: float) -> "stream[_K]"**
+Throttles the stream.
+
+:param max_req: number of requests
+:param interval: period in number of seconds
+:return: throttled stream
+
+Example:
+```py
+>>> s = Stream()
+>>> throttled_stream = s.throttle(10, 1.5)
+>>> for item in throttled_stream:
+...     print(item)
+```
 
 ##### **toSet()**
 returns sset() instance

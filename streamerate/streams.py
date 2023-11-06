@@ -54,7 +54,9 @@ _V = TypeVar("_V")
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
 
-_IDENTITY_FUNC: Callable[[_T], _T] = lambda _: _
+
+def _IDENTITY_FUNC(x: _T) -> _T:
+    return x
 
 
 class ItrFromFunc(Iterable[_K]):
@@ -188,6 +190,7 @@ class _IStream(Iterable[_K], ABC):
                     while not qout.empty():
                         newEl = qout.get()
                         if isinstance(newEl, _MapException):
+                            # pylint: disable=raise-missing-from
                             raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
                         yield newEl
                     break
@@ -1088,6 +1091,24 @@ class _IStream(Iterable[_K], ABC):
 
     unique = distinct
 
+    def product(self, repeat: Optional[int] = None) -> "stream[Tuple[_V,...]]":
+        """
+        Generates the Cartesian Product of stream, similar with itertools.product.
+
+        If repeat is 1, the elements of the stream should be iterables.
+
+        :param repeat: number of times to repeat each element
+
+        >>> stream([1,2,3]).product(2).toList()
+        [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3), (3, 1), (3, 2), (3, 3)]
+
+        >>> stream([[1,2],[3,4,5]]).product().toList()
+        [(1, 3), (1, 4), (1, 5), (2, 3), (2, 4), (2, 5)]
+        """
+        if repeat is None:
+            return stream(ItrFromFunc(lambda: itertools.product(*self)))
+        return stream(ItrFromFunc(lambda: itertools.product(self, repeat=repeat)))
+
     # pylint: disable=too-many-arguments
     def tqdm(
         self,
@@ -1184,9 +1205,19 @@ class _IStream(Iterable[_K], ABC):
 
     def throttle(self, max_req: int, interval: float) -> "stream[_K]":
         """
+        Throttles the stream.
+
         :param max_req: number of requests
         :param interval: period in number of seconds
         :return: throttled stream
+
+        Example:
+            ```py
+            >>> s = Stream()
+            >>> throttled_stream = s.throttle(10, 1.5)
+            >>> for item in throttled_stream:
+            ...     print(item)
+            ```
         """
         throttler = Throttler(max_req, interval)
         return self.map(throttler.throttle)
@@ -1347,7 +1378,7 @@ class AbstractSynchronizedBufferedStream(stream):
             except IndexError:
                 self.__queue.extend(self._getNextBuffer())
                 if len(self.__queue) == 0:
-                    raise StopIteration
+                    raise StopIteration  # pylint: disable=raise-missing-from
                 val = self.__queue.popleft()
 
             return val
@@ -1502,6 +1533,7 @@ class slist(List[_K], stream):
     def _itr(self):
         return ItrFromFunc(lambda: iter(self))
 
+    # pylint: disable=super-init-not-called, non-parent-init-called
     def __init__(self, *args, **kwrds):
         list.__init__(self, *args, **kwrds)
 

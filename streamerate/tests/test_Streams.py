@@ -13,7 +13,11 @@ from multiprocessing import Pool
 from unittest.mock import MagicMock
 
 import gevent
-from pydantic import ValidationError, validate_arguments
+
+try:
+    from pydantic.v1 import ValidationError, validate_arguments
+except ImportError:
+    from pydantic import ValidationError, validate_arguments
 from pyxtension.Json import Json, JsonList
 
 from streamerate.streams import (
@@ -954,6 +958,11 @@ class StreamTestCase(unittest.TestCase):
         s = stream(l).shuffle()
         self.assertNotEqual(l, list(s))
         self.assertSetEqual(set(l), s.toSet())
+
+    def test_shuffle_with_seed(self):
+        l = list(range(10))
+        s = stream(l).shuffle(seed=1).toList()
+        self.assertListEqual([6, 8, 9, 7, 5, 3, 0, 4, 1, 2], s)
 
     def test_maxes(self):
         self.assertEqual(stream(["a", "abc", "abcd", "defg", "cde"]).maxes(lambda s: len(s)), ["abcd", "defg"])

@@ -19,7 +19,7 @@ from multiprocessing import cpu_count
 from multiprocessing.pool import Pool
 from operator import itemgetter
 from queue import Queue
-from random import shuffle
+from random import Random, shuffle
 from types import GeneratorType
 from typing import (
     AbstractSet,
@@ -773,9 +773,13 @@ class _IStream(Iterable[_K], ABC):
     def transform(self, f: Callable[[Iterable[_K]], Iterable[_V]]) -> "stream[_V]":
         return stream(partial(f, self))
 
-    def shuffle(self, random=None) -> "slist[_K]":
+    def shuffle(self, seed: Optional[Union[int | float | str | bytes | bytearray]] = None) -> "slist[_K]":
         lst = self.toList()
-        shuffle(lst, random=random)  # pylint: disable=deprecated-argument
+        if seed is not None:
+            rng = Random(seed)
+            rng.shuffle(lst)
+        else:
+            shuffle(lst)
         return lst
 
     def toSet(self) -> "sset[_K]":
@@ -1015,7 +1019,7 @@ class _IStream(Iterable[_K], ABC):
         try:
             return min(self, key=key)
         except ValueError as e:
-            if "empty sequence" in e.args[0]:
+            if "empty" in e.args[0]:
                 return default
             raise
 

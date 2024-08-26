@@ -249,8 +249,7 @@ class _IStream(Iterable[_K], ABC):
                 if isinstance(q_el, _MapException):
                     raise q_el.exc_info[0](q_el.exc_info[1]).with_traceback(q_el.exc_info[2])
                 cache[q_el.i] = q_el.el
-            for el in extract_all_from_cache():
-                yield el
+            yield from extract_all_from_cache()
             if out_i != in_i + 1:
                 raise RuntimeError("__mtmap_generator Expecting for all elements to be in cache")
 
@@ -262,8 +261,7 @@ class _IStream(Iterable[_K], ABC):
                     qin.put(_EndQueue())
                     for t in threadPool:
                         t.join()
-                    for el in wait_for_all():
-                        yield el
+                    yield from wait_for_all()
                     break
                 else:
                     in_i += 1
@@ -272,8 +270,7 @@ class _IStream(Iterable[_K], ABC):
                     if isinstance(q_el, _MapException):
                         raise q_el.exc_info[0](q_el.exc_info[1]).with_traceback(q_el.exc_info[2])
                     cache[q_el.i] = q_el.el
-                for el in extract_all_from_cache():
-                    yield el
+                yield from extract_all_from_cache()
         finally:
             while not qin.empty():
                 qin.get()
@@ -746,24 +743,19 @@ class _IStream(Iterable[_K], ABC):
         return sdict(collections.Counter(self))
 
     @overload
-    def reduce(self, f: Callable[[_K, _K], _K], init: Optional[_K] = None) -> _K:
-        ...
+    def reduce(self, f: Callable[[_K, _K], _K], init: Optional[_K] = None) -> _K: ...
 
     @overload
-    def reduce(self, f: Callable[[_T, _K], _T], init: _T = None) -> _T:
-        ...
+    def reduce(self, f: Callable[[_T, _K], _T], init: _T = None) -> _T: ...
 
     @overload
-    def reduce(self, f: Callable[[Union[_K, _T], _K], _T], init: Optional[_T] = None) -> _T:
-        ...
+    def reduce(self, f: Callable[[Union[_K, _T], _K], _T], init: Optional[_T] = None) -> _T: ...
 
     @overload
-    def reduce(self, f: Callable[[Union[_K, _T], _K], _T], init: Optional[_K] = None) -> _T:
-        ...
+    def reduce(self, f: Callable[[Union[_K, _T], _K], _T], init: Optional[_K] = None) -> _T: ...
 
     @overload
-    def reduce(self, f: Callable[[_T, _K], _T], init: _T = None) -> _T:
-        ...
+    def reduce(self, f: Callable[[_T, _K], _T], init: _T = None) -> _T: ...
 
     def reduce(self, f, init=None):
         if init is None:
@@ -773,7 +765,7 @@ class _IStream(Iterable[_K], ABC):
     def transform(self, f: Callable[[Iterable[_K]], Iterable[_V]]) -> "stream[_V]":
         return stream(partial(f, self))
 
-    def shuffle(self, seed: Optional[Union[int | float | str | bytes | bytearray]] = None) -> "slist[_K]":
+    def shuffle(self, seed: Optional[Union[int, float, str, bytes, bytearray]] = None) -> "slist[_K]":
         lst = self.toList()
         if seed is not None:
             rng = Random(seed)
@@ -814,12 +806,10 @@ class _IStream(Iterable[_K], ABC):
         return res
 
     @overload
-    def __getitem__(self, i: slice) -> "stream[_K]":
-        ...
+    def __getitem__(self, i: slice) -> "stream[_K]": ...
 
     @overload
-    def __getitem__(self, i: int) -> _K:
-        ...
+    def __getitem__(self, i: int) -> _K: ...
 
     def __getitem__(self, i: Union[slice, int]):
         if isinstance(i, slice):
@@ -1234,8 +1224,8 @@ class _IStream(Iterable[_K], ABC):
         :return: chunk of data with header
         :rtype: str
         """
-        l = len(binaryData)
-        p = struct.pack("<L", l)
+        sz = len(binaryData)
+        p = struct.pack("<L", sz)
         assert len(p) == 4
         return p + binaryData
 
@@ -1338,13 +1328,13 @@ class stream(_IStream, Iterable[_K], _PydanticValidated):
                 return
             if len(s) != 4:
                 raise IOError("Wrong pickled file format")
-            l = struct.unpack(format, s)[0]
-            s = fs.read(l)
+            next_read_sz = struct.unpack(format, s)[0]
+            _struct = fs.read(next_read_sz)
             if statHandler is not None:
                 count += 1
-                sz += 4 + l
+                sz += 4 + next_read_sz
                 statHandler((count, sz))
-            yield s
+            yield _struct
 
     # pylint: disable=redefined-builtin
     @staticmethod

@@ -30,6 +30,17 @@ or
 git submodule add https://github.com/asuiu/streamerate.git
 ```
 
+### For developers (running unit tests)
+
+First install [Poetry](https://python-poetry.org/docs/) and make sure it
+is in your `$PATH`. Create a virtual environment using Poetry and then
+use the script to run tests:
+```bash
+poetry install
+poetry run ./run_tests.py
+```
+
+
 ## Modules overview
 
 ### streams.py

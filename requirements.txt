@@ -3,4 +3,3 @@ pydantic>=1.8.2;python_version>="3"
 tblib>=1.7.0;python_version>="3"
 throttlex>=1.0.0
 tqdm>=4.62.0;python_version>="3"
-dnspython>=2.6.0rc1 # not directly required, pinned by Snyk to avoid a vulnerability

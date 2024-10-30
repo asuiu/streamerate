@@ -904,6 +904,11 @@ class StreamTestCase(unittest.TestCase):
         self.assertEqual(sg.next(), 1)
         self.assertListEqual(list(sg), [2, 3])
 
+    def test_next_raises_stopiteration_when_empty(self):
+        s = stream([])
+        with self.assertRaises(StopIteration):
+            s.next()
+
     def testStreamPickling(self):
         sio = BytesIO()
         expected = slist(slist((i,)) for i in xrange(10))
@@ -938,6 +943,39 @@ class StreamTestCase(unittest.TestCase):
     def test_flatMap_defaultIdentityFunction(self):
         l = slist(({1: 2, 3: 4}, {5: 6, 7: 8}))
         self.assertEqual(l.flatMap().toSet(), set((1, 3, 5, 7)))
+
+    def test_makeMapping(self):
+        s = stream([1, 2, 3])
+        self.assertListEqual(
+            s.pairWith(lambda x: x + 1).toList(), [(1, 2), (2, 3), (3, 4)]
+        )
+
+    def test_makeInverseMapping(self):
+        s = stream([1, 2, 3])
+        self.assertListEqual(
+            s.pairBy(lambda x: x + 1).toList(), [(2, 1), (3, 2), (4, 3)]
+        )
+
+    def test_mapKeys(self):
+        s = stream({"a": 1, "b": 2}.items())
+        self.assertDictEqual(s.mapKeys(str.upper).toMap(), {"A": 1, "B": 2})
+
+    def test_mapValues(self):
+        s = stream({"a": 1, "b": 2}.items())
+        self.assertDictEqual(s.mapValues(lambda x: x + 1).toMap(), {"a": 2, "b": 3})
+
+    def test_filter_keys(self) -> None:
+        xs = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
+        fn = lambda x: x in ["a", "c", "e"]
+        xys = stream(xs.items()).filterKeys(fn).to_dict()  # pyre-ignore[16]
+        self.assertDictEqual(xys, {"a": 1, "c": 3, "e": 5})
+
+    def test_filter_values(self) -> None:
+        xs = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
+        fn = lambda x: x % 2 == 0
+        xys = stream(xs.items()).filterValues(fn).to_dict()  # pyre-ignore[16]
+        self.assertDictEqual(xys, {"b": 2, "d": 4})
+
 
     def test_reduceUsesInitProperly(self):
         self.assertEqual(slist([sset((1, 2)), sset((3, 4))]).reduce(lambda x, y: x.update(y)), set((1, 2, 3, 4)))
@@ -1261,10 +1299,26 @@ class StreamTestCase(unittest.TestCase):
         s = stream([])
         self.assertListEqual(s.batch(3).toList(), [])
 
+    def test_take(self):
+        s = stream(range(4))
+        self.assertListEqual(s.take(2).toList(), [0, 1])
+        # the original stream is not mutated
+        self.assertListEqual(s.toList(), [0, 1, 2, 3])
+
     def test_takeWhile(self):
         s = stream(partial(iter, [1, 4, 6, 4, 1]))
         self.assertListEqual(s.takeWhile(lambda x: x < 5).toList(), [1, 4])
         self.assertListEqual(s.takeWhile(lambda x: x < 5).toList(), [1, 4])
+
+    def test_drop(self):
+        s = stream(range(4))
+        self.assertListEqual(s.drop(2).toList(), [2, 3])
+        # the original stream is not mutated
+        self.assertListEqual(s.toList(), [0, 1, 2, 3])
+
+    def test_drop_too_many(self):
+        s = stream(range(10))
+        self.assertListEqual(s.drop(15).toList(), [])
 
     def test_dropWhile(self):
         s = stream(partial(iter, [1, 4, 6, 4, 1]))
@@ -1428,6 +1482,15 @@ class StreamTestCase(unittest.TestCase):
         s = stream(range(3))
         self.assertListEqual(s.to_list(), [0, 1, 2])
 
+    def test_to_dataframe(self):
+        s = stream([
+            {"name": "Alice", "age": 30},
+            {"name": "Bob", "age": 45}
+        ])
+        df = s.toDataFrame()
+        self.assertSetEqual(set(df.columns), {"name", "age"})
+        self.assertListEqual(list(df["name"]), ["Alice", "Bob"])
+
     def test_map_stream(self):
         s = stream((("a", 2), (3, 4)))
         d = s.map_stream(dict)
@@ -1439,6 +1502,15 @@ class StreamTestCase(unittest.TestCase):
         s = stream(range(3))
         result = s.for_each(l.append)
         self.assertIsNone(result)
+        self.assertListEqual(l, [0, 1, 2])
+
+    def test_tap(self):
+        l = []
+        s = stream(range(3))
+        t = s.tap(l.append)
+        # s.tap(f) has the same items as s
+        self.assertListEqual(t.toList(), s.toList())
+        # but the side effect was carried out
         self.assertListEqual(l, [0, 1, 2])
 
     def test_add_observer_nominal(self):

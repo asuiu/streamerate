@@ -50,7 +50,9 @@ from tqdm import tqdm
 __author__ = "andrei.suiu@gmail.com"
 
 _K = TypeVar("_K")
+_K2 = TypeVar("_K2")
 _V = TypeVar("_V")
+_V2 = TypeVar("_V2")
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
 
@@ -590,9 +592,80 @@ class _IStream(Iterable[_K], ABC):
             return stream(ItrFromFunc(lambda: itertools.chain.from_iterable(self)))
         return stream(ItrFromFunc(lambda: itertools.chain.from_iterable(self.map(predicate))))
 
+    def pairWith(
+        self: "stream[_K]", f: Callable[[_K], _V]
+    ) -> "stream[Tuple[_K, _V]]":
+        """Apply a unary function to a stream of values x and produce a
+        stream of tuples (x, f(x)). Useful for chaining with `.toMap()`.
+        """
+        return self.map(lambda x: (x, f(x)))
+
+    def pairBy(
+        self: "stream[_V]", f: Callable[[_V], _K]
+    ) -> "stream[Tuple[_K, _V]]":
+        """As makeMapping, but returns a tuple of (f(x), x). Useful
+        when building a dict where it's the f(x)'s that are hashable,
+        not the x's.
+        """
+        return self.map(lambda x: (f(x), x))
+
+    def mapKeys(
+        self: "stream[Tuple[_K, _V]]", f: Callable[[_K], _K2]
+    ) -> "stream[Tuple[_K2, _V]]":
+        """Apply a unary function to the first elements of a stream of
+        binary tuples. Useful when applying a tranformation to a stream
+        but you want to keep the original values for a later
+        transformation or filter, e.g. if you want to transform the keys
+        of a dict but not the values.
+        """
+        return self.map(lambda kv: (f(kv[0]), kv[1]))
+
+    def mapValues(
+        self: "stream[Tuple[_K, _V]]", f: Callable[[_V], _V2]
+    ) -> "stream[Tuple[_K, _V2]]":
+        """As mapKeys but to the second element of each tuple."""
+        return self.map(lambda kv: (kv[0], f(kv[1])))
+
+    def filterKeys(
+        self: "stream[Tuple[_K, _V]]", predicate: Callable[[_K], bool]
+    ) -> "stream[Tuple[_K, _V]]":
+        """Filter a stream of binary tuples according to a predicate on
+        the first element.
+        """
+        return self.filter(lambda kv: predicate(kv[0]))
+
+    def filterValues(
+        self: "stream[Tuple[_K, _V]]", predicate: Callable[[_V], bool]
+    ) -> "stream[Tuple[_K, _V]]":
+        """Filter a stream of binary tuples according to a predicate on
+        the second element.
+        """
+        return self.filter(lambda kv: predicate(kv[1]))
+
     def for_each(self, f: Callable[[_K], None]) -> None:
         for el in self:
             f(el)
+
+    def tap(self, f: Callable[[_K], Any]) -> "stream[_K]":
+        """Apply a unary function to each element of this stream, but
+        discard any return value and just return the original stream.
+        Useful for functions with side effects, like logging.
+
+        Example:
+
+            >>> stream(...).tap(print).map(...).tap(print).toList()
+
+        will print the stream twice, before and after the map.
+
+        Use a `functools.partial`  to pass additional keyword arguments:
+
+            >>> stream(...).tap(partial(print, sep=' ')).map(...).toList()
+        """
+        def tap_f(x):
+            f(x)
+            return x
+
+        return self.map(tap_f)
 
     def add_observer(self, f: Callable[[_K], None]) -> "stream[_K]":
         """
@@ -805,6 +878,15 @@ class _IStream(Iterable[_K], ABC):
                 res[k] = v
         return res
 
+    def toDataFrame(self: "stream[Dict[str, _V]]", *args, **kwargs) -> "pd.DataFrame":
+        """Convert a stream of records into a Pandas dataframe."""
+        try:
+            import pandas as pd
+        except ImportError as e:
+            raise RuntimeError("pandas is not available") from e
+
+        return pd.DataFrame.from_records(self.toList(), *args, **kwargs)
+
     @overload
     def __getitem__(self, i: slice) -> "stream[_K]": ...
 
@@ -899,6 +981,9 @@ class _IStream(Iterable[_K], ABC):
         return stream(lambda: stream(batch_gen(iter(self))))
 
     def take(self, n: int) -> "stream[_K]":
+        """Return a stream that consists of the first n elements of this
+        stream. This stream itself is not mutated.
+        """
         def gen(other_gen: GeneratorType, n):
             count = 0
             while count < n:
@@ -935,10 +1020,28 @@ class _IStream(Iterable[_K], ABC):
 
         return stream(gen(self, predicate))
 
+    def drop(self, n: int):
+        """Return a stream that doesn't have the first n elements of
+        this stream. If there aren't enough elements then the new stream
+        is empty. This stream itself is not mutated.
+        """
+        s = stream(self)
+
+        for _ in range(n):
+            try:
+                s.next()
+            except StopIteration:
+                break
+
+        return s
+
     def dropWhile(self, predicate: Callable[[_K], bool]):
         return stream(partial(itertools.dropwhile, predicate, self))
 
     def next(self) -> _K:
+        """Remove the next element from this stream, and return it.
+        Raise StopIteration if there are no more elements.
+        """
         if self._itr is not None:
             try:
                 n = next(self._itr)

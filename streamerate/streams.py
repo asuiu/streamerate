@@ -1376,7 +1376,7 @@ class _IStream(Iterable[_K], ABC):
         return stream(lambda: indexIgnorer(indexSet, self))
 
 
-class _PydanticValidated:
+class _PydanticCoercingValidated:
     @classmethod
     def __get_validators__(cls):
         yield cls._pydantic_validator
@@ -1384,7 +1384,7 @@ class _PydanticValidated:
     @classmethod
     def _pydantic_validator(cls, v):
         if not isinstance(v, cls):
-            raise TypeError(f"{repr(v)} is of type {type(v)} but is expected to be of {cls}")
+            return cls(v)
         return v
 
     @classmethod
@@ -1396,7 +1396,7 @@ class _PydanticValidated:
         )
 
 
-class stream(_IStream, Iterable[_K], _PydanticValidated):
+class stream(_IStream, Iterable[_K], _PydanticCoercingValidated):
     def __init__(self, itr: Optional[Union[Iterable[_K], Iterator[_K], Callable[[], Iterable[_K]]]] = None):
         self._itr, self._f = self._init_itr(itr)
 

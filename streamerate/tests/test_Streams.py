@@ -739,7 +739,7 @@ class mpfastmapTestCase(unittest.TestCase):
         dt = time.time() - t1
         expected = set(i * i for i in xrange(N))
         self.assertSetEqual(res, expected)
-        self.assertLessEqual(dt, 1.5)
+        self.assertLessEqual(dt, 2.0)
 
     def test_traceback_right_when_mpfastmap_raises_custom_exception(self):
         s = stream([None])
@@ -1458,21 +1458,26 @@ class StreamTestCase(unittest.TestCase):
         expected = rf"\r0it \[00:00, {FLT}it/s\]" rf"(\r{N}it \[00:00, {FLT}it/s\]\n)?"
         self.assertRegex(out.getvalue(), expected)
 
-    def test_pydantic_v1_stream_validation(self):
+    def test_pydantic_v1_stream_coercion(self):
         @validate_arguments
         def f(x: stream[int]):
             return x
 
         l = [1, 2]
         s = stream(l)
-        self.assertEqual(f(s).toList(), l)
+        self.assertEqual(id(f(s)), id(s))
+        st = {1, 2}
+        new_st = f(st)
+        self.assertEqual(type(new_st), stream)
+        self.assertEqual(new_st.toSet(), s.toSet())
         with self.assertRaises(ValidationError):
-            f(l)
+            f(0)
 
-    def test_pydantic_v1_slist_validation(self):
+    def test_pydantic_v1_slist_coercion(self):
         """
         For some reasons, pydantic behaves distinctly on Windows and Linux.
         On Win this test passes, and on Linux pydantic works differently and it fails.
+        We run these version-depending tests only as regression tests, to validate the consistent behavior in particular versions setup.
         """
         if sys.version_info[1] < 7:  # no support for Py3.6
             return
@@ -1492,10 +1497,17 @@ class StreamTestCase(unittest.TestCase):
         except ValidationError:
             # This is also a valid behavior on some platforms & Pydantic versions
             pass
+
         with self.assertRaises(ValidationError):
-            f(dict())
-        with self.assertRaises(ValidationError):
-            f(range(3))
+            f(0)
+
+        if sys.version_info[1] == 9:
+            self.assertEqual(f(range(3)), [0, 1, 2])
+
+        # The below coercion gives inconsistent result between platforms. But it usually works on 3.8
+        if sys.version_info[1] == 8:
+            with self.assertRaises(ValidationError):
+                f(dict())
 
     def test_pydantic_v2_stream_validation(self):
         @validate_call

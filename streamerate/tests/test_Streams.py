@@ -1465,11 +1465,11 @@ class StreamTestCase(unittest.TestCase):
 
         l = [1, 2]
         s = stream(l)
-        self.assertEquals(id(f(s)), id(s))
+        self.assertEqual(id(f(s)), id(s))
         st = {1, 2}
         new_st = f(st)
-        self.assertEquals(type(new_st), stream)
-        self.assertEquals(new_st.toSet(), s.toSet())
+        self.assertEqual(type(new_st), stream)
+        self.assertEqual(new_st.toSet(), s.toSet())
         with self.assertRaises(ValidationError):
             f(0)
 

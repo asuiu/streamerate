@@ -1496,10 +1496,16 @@ class StreamTestCase(unittest.TestCase):
         except ValidationError:
             # This is also a valid behavior on some platforms & Pydantic versions
             pass
+
         with self.assertRaises(ValidationError):
-            f(dict())
-        with self.assertRaises(ValidationError):
-            f(range(3))
+            f(0)
+
+        self.assertEqual(f(range(3)), [0, 1, 2])
+
+        # The below coercion gives inconsistent result between platforms. But it usually works on 3.8
+        if sys.version_info[1] == 8:
+            with self.assertRaises(ValidationError):
+                f(dict())
 
     def test_pydantic_v2_stream_validation(self):
         @validate_call

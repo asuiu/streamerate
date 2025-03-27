@@ -19,13 +19,13 @@ throttlex = ">=1.0.0"
 gevent = ">=21.1.2"
 tblib = ">=1.7.0"
 
-[tool.poetry.dev-dependencies]
-pandas = ">=2.0.3"  # the latest version of pandas that supports Python 3.8
-pyxtension = "==1.16.8" # the latest version of pyxtension that supports Python 3.8
+[tool.poetry.group.dev.dependencies]
+pandas = "==2.0.3"  # the latest version of pandas that supports Python 3.8
+pyxtension = "==1.17.0" # the latest version of pyxtension that supports Python 3.8
 pre-commit = ">=3.5.0"
 twine = ">=5.1.1"
 tomli = "^2.0.1"
-pydantic = ">=2.0.3"
+pydantic = "==2.0.3"
 
 [tool.poetry.scripts]
 test = "tasks:test"

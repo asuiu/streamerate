@@ -4,18 +4,17 @@ import os
 import sys
 import unittest
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     testLoader = unittest.TestLoader()
-    pymajorVersion = sys.version_info[0]
-    packageDir = os.path.join(os.path.dirname(__file__), "streamerate")
-    testsDir = os.path.join(packageDir, "tests")
-    trunner = unittest.TextTestRunner(sys.stdout, descriptions=True, verbosity=0)
-    testSuite = testLoader.discover(start_dir=testsDir, pattern="test_*.py", top_level_dir=testsDir)
-    res = trunner.run(testSuite)
+    packageDir = os.path.dirname(__file__)
+    testsDir = os.path.join(packageDir, "streamerate", "tests")
 
-    testSuite = testLoader.discover(start_dir=testsDir, pattern="test_*.py", top_level_dir=testsDir)
-    testResult = unittest.TestResult()
-    res = testSuite.run(testResult)
-    assert not res.errors, "Unittests error: %s" % res.errors
-    print(res)
+    # Run tests with output
+    trunner = unittest.TextTestRunner(sys.stdout, descriptions=True, verbosity=2)
+    testSuite = testLoader.discover(start_dir=testsDir, pattern="test_*.py", top_level_dir=packageDir)
+    result = trunner.run(testSuite)
+
+    # Exit with error code if tests failed
+    if not result.wasSuccessful():
+        sys.exit(1)
+    sys.exit(0)

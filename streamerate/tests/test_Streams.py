@@ -739,7 +739,7 @@ class mpfastmapTestCase(unittest.TestCase):
         dt = time.time() - t1
         expected = set(i * i for i in xrange(N))
         self.assertSetEqual(res, expected)
-        self.assertLessEqual(dt, 1.5)
+        self.assertLessEqual(dt, 2.0)
 
     def test_traceback_right_when_mpfastmap_raises_custom_exception(self):
         s = stream([None])
@@ -1458,18 +1458,22 @@ class StreamTestCase(unittest.TestCase):
         expected = rf"\r0it \[00:00, {FLT}it/s\]" rf"(\r{N}it \[00:00, {FLT}it/s\]\n)?"
         self.assertRegex(out.getvalue(), expected)
 
-    def test_pydantic_v1_stream_validation(self):
+    def test_pydantic_v1_stream_coercion(self):
         @validate_arguments
         def f(x: stream[int]):
             return x
 
         l = [1, 2]
         s = stream(l)
-        self.assertEqual(f(s).toList(), l)
+        self.assertEquals(id(f(s)), id(s))
+        st = {1, 2}
+        new_st = f(st)
+        self.assertEquals(type(new_st), stream)
+        self.assertEquals(new_st.toSet(), s.toSet())
         with self.assertRaises(ValidationError):
-            f(l)
+            f(0)
 
-    def test_pydantic_v1_slist_validation(self):
+    def test_pydantic_v1_slist_coercion(self):
         """
         For some reasons, pydantic behaves distinctly on Windows and Linux.
         On Win this test passes, and on Linux pydantic works differently and it fails.

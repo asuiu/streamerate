@@ -1,6 +1,5 @@
 # streamerate
-[![build Status](https://travis-ci.org/asuiu/streamerate.svg?branch=master)](https://travis-ci.org/asuiu/streamerate)
-[![Coverage Status](https://coveralls.io/repos/asuiu/streamerate/badge.svg?branch=master&service=github)](https://coveralls.io/github/asuiu/streamerate?branch=master)
+[![Build Status](https://github.com/asuiu/streamerate/actions/workflows/python-package.yml/badge.svg?branch=master)](https://github.com/asuiu/streamerate/actions/workflows/python-package.yml)
 
 __[streamerate](https://github.com/asuiu/streamerate)__  is a powerful pure-Python library inspired by **[Fluent Interface pattern](https://en.wikipedia.org/wiki/Fluent_interface)** (used by Java 8 streams), providing a chainable and expressive approach to processing iterable data.
 

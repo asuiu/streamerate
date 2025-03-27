@@ -43,6 +43,22 @@ from typing import (
 )
 
 import gevent.pool
+
+try:
+    from pydantic_core.core_schema import any_schema as pydantic_any_schema
+    from pydantic_core.core_schema import list_schema as pydantic_list_schema
+    from pydantic_core.core_schema import (
+        no_info_after_validator_function as pydantic_no_info_after_validator_function,
+    )
+except ImportError:
+
+    def __func_raising(*args, **kwargs):
+        raise ImportError("pydantic V2 is not installed")
+
+    pydantic_list_schema = __func_raising
+    pydantic_any_schema = __func_raising
+    pydantic_no_info_after_validator_function = __func_raising
+
 from tblib import pickling_support
 from throttlex import Throttler
 from tqdm import tqdm
@@ -592,26 +608,20 @@ class _IStream(Iterable[_K], ABC):
             return stream(ItrFromFunc(lambda: itertools.chain.from_iterable(self)))
         return stream(ItrFromFunc(lambda: itertools.chain.from_iterable(self.map(predicate))))
 
-    def pairWith(
-        self: "stream[_K]", f: Callable[[_K], _V]
-    ) -> "stream[Tuple[_K, _V]]":
+    def pairWith(self: "stream[_K]", f: Callable[[_K], _V]) -> "stream[Tuple[_K, _V]]":
         """Apply a unary function to a stream of values x and produce a
         stream of tuples (x, f(x)). Useful for chaining with `.toMap()`.
         """
         return self.map(lambda x: (x, f(x)))
 
-    def pairBy(
-        self: "stream[_V]", f: Callable[[_V], _K]
-    ) -> "stream[Tuple[_K, _V]]":
+    def pairBy(self: "stream[_V]", f: Callable[[_V], _K]) -> "stream[Tuple[_K, _V]]":
         """As makeMapping, but returns a tuple of (f(x), x). Useful
         when building a dict where it's the f(x)'s that are hashable,
         not the x's.
         """
         return self.map(lambda x: (f(x), x))
 
-    def mapKeys(
-        self: "stream[Tuple[_K, _V]]", f: Callable[[_K], _K2]
-    ) -> "stream[Tuple[_K2, _V]]":
+    def mapKeys(self: "stream[Tuple[_K, _V]]", f: Callable[[_K], _K2]) -> "stream[Tuple[_K2, _V]]":
         """Apply a unary function to the first elements of a stream of
         binary tuples. Useful when applying a tranformation to a stream
         but you want to keep the original values for a later
@@ -620,23 +630,17 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.map(lambda kv: (f(kv[0]), kv[1]))
 
-    def mapValues(
-        self: "stream[Tuple[_K, _V]]", f: Callable[[_V], _V2]
-    ) -> "stream[Tuple[_K, _V2]]":
+    def mapValues(self: "stream[Tuple[_K, _V]]", f: Callable[[_V], _V2]) -> "stream[Tuple[_K, _V2]]":
         """As mapKeys but to the second element of each tuple."""
         return self.map(lambda kv: (kv[0], f(kv[1])))
 
-    def filterKeys(
-        self: "stream[Tuple[_K, _V]]", predicate: Callable[[_K], bool]
-    ) -> "stream[Tuple[_K, _V]]":
+    def filterKeys(self: "stream[Tuple[_K, _V]]", predicate: Callable[[_K], bool]) -> "stream[Tuple[_K, _V]]":
         """Filter a stream of binary tuples according to a predicate on
         the first element.
         """
         return self.filter(lambda kv: predicate(kv[0]))
 
-    def filterValues(
-        self: "stream[Tuple[_K, _V]]", predicate: Callable[[_V], bool]
-    ) -> "stream[Tuple[_K, _V]]":
+    def filterValues(self: "stream[Tuple[_K, _V]]", predicate: Callable[[_V], bool]) -> "stream[Tuple[_K, _V]]":
         """Filter a stream of binary tuples according to a predicate on
         the second element.
         """
@@ -661,6 +665,7 @@ class _IStream(Iterable[_K], ABC):
 
             >>> stream(...).tap(partial(print, sep=' ')).map(...).toList()
         """
+
         def tap_f(x):
             f(x)
             return x
@@ -984,6 +989,7 @@ class _IStream(Iterable[_K], ABC):
         """Return a stream that consists of the first n elements of this
         stream. This stream itself is not mutated.
         """
+
         def gen(other_gen: GeneratorType, n):
             count = 0
             while count < n:
@@ -1380,6 +1386,14 @@ class _PydanticValidated:
         if not isinstance(v, cls):
             raise TypeError(f"{repr(v)} is of type {type(v)} but is expected to be of {cls}")
         return v
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source: Any, handler: Any):
+        # return pydantic_no_info_plain_validator_function(cls)
+
+        return pydantic_no_info_after_validator_function(
+            cls, pydantic_list_schema(items_schema=pydantic_any_schema())  # Convert the list into an stream instance after validation
+        )
 
 
 class stream(_IStream, Iterable[_K], _PydanticValidated):

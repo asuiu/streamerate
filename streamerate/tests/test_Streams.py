@@ -13,11 +13,14 @@ from multiprocessing import Pool
 from unittest.mock import MagicMock
 
 import gevent
+import pydantic_core
+from pydantic import validate_call
 
 try:
     from pydantic.v1 import ValidationError, validate_arguments
 except ImportError:
     from pydantic import ValidationError, validate_arguments
+
 from pyxtension.Json import Json, JsonList
 
 from streamerate.streams import (
@@ -319,6 +322,27 @@ class fastmapTestCase(unittest.TestCase):
         s = stream([None])
         with self.assertRaises(TypeError):
             _ = s.fastmap(lambda x: x * x, poolSize=4).toSet()
+
+    def test_fastmap_raises_exception(self):
+        def f(x):
+            if x == 1:
+                raise TypeError("Error")
+            if x == 2:
+                raise RuntimeError("Error")
+            if x == 3:
+                raise Exception("Error")
+            raise RuntimeError("Error")
+
+        s = stream(range(10))
+        l = []
+        try:
+            a = s.fastmap(f, poolSize=4).toList()
+        except Exception as e:
+            print(e)
+            l.append(e)
+        print(l)
+        # with self.assertRaises(RuntimeError):
+        #     _ = s.fastmap(lambda x: x * x, poolSize=4).toSet()
 
     def test_traceback_right_when_fastmap_raises_builtin_exception(self):
         s = stream([None])
@@ -946,15 +970,11 @@ class StreamTestCase(unittest.TestCase):
 
     def test_makeMapping(self):
         s = stream([1, 2, 3])
-        self.assertListEqual(
-            s.pairWith(lambda x: x + 1).toList(), [(1, 2), (2, 3), (3, 4)]
-        )
+        self.assertListEqual(s.pairWith(lambda x: x + 1).toList(), [(1, 2), (2, 3), (3, 4)])
 
     def test_makeInverseMapping(self):
         s = stream([1, 2, 3])
-        self.assertListEqual(
-            s.pairBy(lambda x: x + 1).toList(), [(2, 1), (3, 2), (4, 3)]
-        )
+        self.assertListEqual(s.pairBy(lambda x: x + 1).toList(), [(2, 1), (3, 2), (4, 3)])
 
     def test_mapKeys(self):
         s = stream({"a": 1, "b": 2}.items())
@@ -975,7 +995,6 @@ class StreamTestCase(unittest.TestCase):
         fn = lambda x: x % 2 == 0
         xys = stream(xs.items()).filterValues(fn).to_dict()  # pyre-ignore[16]
         self.assertDictEqual(xys, {"b": 2, "d": 4})
-
 
     def test_reduceUsesInitProperly(self):
         self.assertEqual(slist([sset((1, 2)), sset((3, 4))]).reduce(lambda x, y: x.update(y)), set((1, 2, 3, 4)))
@@ -1439,7 +1458,7 @@ class StreamTestCase(unittest.TestCase):
         expected = rf"\r0it \[00:00, {FLT}it/s\]" rf"(\r{N}it \[00:00, {FLT}it/s\]\n)?"
         self.assertRegex(out.getvalue(), expected)
 
-    def test_pydantic_stream_validation(self):
+    def test_pydantic_v1_stream_validation(self):
         @validate_arguments
         def f(x: stream[int]):
             return x
@@ -1450,7 +1469,7 @@ class StreamTestCase(unittest.TestCase):
         with self.assertRaises(ValidationError):
             f(l)
 
-    def test_pydantic_slist_validation(self):
+    def test_pydantic_v1_slist_validation(self):
         """
         For some reasons, pydantic behaves distinctly on Windows and Linux.
         On Win this test passes, and on Linux pydantic works differently and it fails.
@@ -1478,15 +1497,50 @@ class StreamTestCase(unittest.TestCase):
         with self.assertRaises(ValidationError):
             f(range(3))
 
+    def test_pydantic_v2_stream_validation(self):
+        @validate_call
+        def f(x: stream[int]):
+            return x
+
+        l = [1, 2]
+        s = stream(l)
+        self.assertIsInstance(f(s), stream)
+
+        self.assertEqual(f(s).toList(), l)
+        stream_from_list = f(l)
+        self.assertIsInstance(stream_from_list, stream)
+
+        with self.assertRaises(pydantic_core._pydantic_core.ValidationError):
+            f(3)
+
+    def test_pydantic_v2_slist_validation(self):
+        """
+        There's a way to achieve th v1 functionality (i.e. convert to int), but might hit performance
+           The example can be found in tsx.BaseTS implementation
+        """
+        if sys.version_info[1] < 7:  # no support for Py3.6
+            return
+        if os.name != "nt":
+            return
+
+        @validate_call
+        def f(x: slist[int]):
+            return x
+
+        st = {1.49, "2"}
+        converted = f(st)
+        self.assertIsInstance(converted, slist)
+        self.assertEqual(converted.toSet(), st)
+        self.assertEqual(f(iter(range(3))), [0, 1, 2])
+        with self.assertRaises(pydantic_core._pydantic_core.ValidationError):
+            f(dict())
+
     def test_to_list(self):
         s = stream(range(3))
         self.assertListEqual(s.to_list(), [0, 1, 2])
 
     def test_to_dataframe(self):
-        s = stream([
-            {"name": "Alice", "age": 30},
-            {"name": "Bob", "age": 45}
-        ])
+        s = stream([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 45}])
         df = s.toDataFrame()
         self.assertSetEqual(set(df.columns), {"name", "age"})
         self.assertListEqual(list(df["name"]), ["Alice", "Bob"])

@@ -323,7 +323,7 @@ class fastmapTestCase(unittest.TestCase):
         with self.assertRaises(TypeError):
             _ = s.fastmap(lambda x: x * x, poolSize=4).toSet()
 
-    def test_fastmap_raises_exception(self):
+    def test_fastmap_raises_exception2(self):
         def f(x):
             if x == 1:
                 raise TypeError("Error")
@@ -358,10 +358,45 @@ class fastmapTestCase(unittest.TestCase):
             return
         self.fail("No expected exceptions has been raised")
 
+    def test_traceback_right_when_mtmap_raises_builtin_exception(self):
+        s = stream([None])
+
+        def f(x):
+            return x * x
+
+        try:
+            s.mtmap(f, poolSize=4).map(lambda x: x).toSet()
+        except TypeError as e:
+            line = traceback.TracebackException.from_exception(e).stack[6].line
+            self.assertEqual(line, "return x * x")
+            return
+        self.fail("No expected exceptions has been raised")
+
+    def test_traceback_right_when_fastmap_raises_exception_in_another_func(self):
+        s = stream([None])
+
+        def some_other_func(x):
+            return x * x
+
+        def f(x):
+            return some_other_func(x)
+
+        try:
+            s.fastmap(f, poolSize=4).toSet()
+        except TypeError as e:
+            line1 = traceback.TracebackException.from_exception(e).stack[5].line
+            self.assertEqual(line1, "return some_other_func(x)")
+            line2 = traceback.TracebackException.from_exception(e).stack[6].line
+            self.assertEqual(line2, "return x * x")
+            return
+        self.fail("No expected exceptions has been raised")
+
     def test_traceback_right_when_fastmap_raises_custom_exception(self):
+        """ tests a regression related to exceptions with multiple parameters """
         class SomeCustomException(Exception):
-            def __init__(self, message):
+            def __init__(self, message, some_other_param):
                 self.message = message
+                self.some_other_param = some_other_param
 
             def __str__(self):  # pragma: no cover
                 return "APIError(code=%s)" % (self.message)
@@ -369,13 +404,13 @@ class fastmapTestCase(unittest.TestCase):
         s = stream([None])
 
         def f(x):
-            raise SomeCustomException("")
+            raise SomeCustomException("msg", "some_other_param")
 
         try:
             s.fastmap(f, poolSize=4).toSet()
         except SomeCustomException as e:
             line = traceback.TracebackException.from_exception(e).stack[5].line
-            self.assertEqual(line, 'raise SomeCustomException("")')
+            self.assertEqual(line, 'raise SomeCustomException("msg", "some_other_param")')
             return
         self.fail("No expected exceptions has been raised")
 

@@ -95,6 +95,13 @@ class _EndQueue:
 class _MapException:
     def __init__(self, exc_info):
         self.exc_info = exc_info
+        self.exc_type, self.exc_value, self.tb = exc_info
+
+    def get_adjusted_exception(self) -> Exception:
+        """
+        Returns the exception instance from the stored exc_info.
+        """
+        return self.exc_value.with_traceback(self.tb)
 
 
 class _QElement(NamedTuple):
@@ -209,14 +216,15 @@ class _IStream(Iterable[_K], ABC):
                         newEl = qout.get()
                         if isinstance(newEl, _MapException):
                             # pylint: disable=raise-missing-from
-                            raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
+                            raise newEl.get_adjusted_exception()
+
                         yield newEl
                     break
                 else:
                     qin.put(el)
                     newEl = qout.get()
                     if isinstance(newEl, _MapException):
-                        raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
+                        raise newEl.get_adjusted_exception()
                     yield newEl
         finally:
             while not qin.empty():
@@ -265,7 +273,7 @@ class _IStream(Iterable[_K], ABC):
             while not qout.empty():
                 q_el = qout.get()
                 if isinstance(q_el, _MapException):
-                    raise q_el.exc_info[0](q_el.exc_info[1]).with_traceback(q_el.exc_info[2])
+                    raise q_el.get_adjusted_exception()
                 cache[q_el.i] = q_el.el
             yield from extract_all_from_cache()
             if out_i != in_i + 1:
@@ -286,7 +294,7 @@ class _IStream(Iterable[_K], ABC):
                     qin.put(_QElement(in_i, el))
                     q_el = qout.get()
                     if isinstance(q_el, _MapException):
-                        raise q_el.exc_info[0](q_el.exc_info[1]).with_traceback(q_el.exc_info[2])
+                        raise q_el.get_adjusted_exception()
                     cache[q_el.i] = q_el.el
                 yield from extract_all_from_cache()
         finally:
@@ -331,7 +339,7 @@ class _IStream(Iterable[_K], ABC):
         while qout_counter < len(threadPool):
             newEl = qout.get()
             if isinstance(newEl, _MapException):
-                raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
+                raise newEl.get_adjusted_exception()
             if isinstance(newEl, _EndQueue):
                 qout_counter += 1
                 if qout_counter >= len(threadPool):
@@ -341,7 +349,7 @@ class _IStream(Iterable[_K], ABC):
                     while not qout.empty():
                         newEl = qout.get()
                         if isinstance(newEl, _MapException):
-                            raise newEl.exc_info[0](newEl.exc_info[1]).with_traceback(newEl.exc_info[2])
+                            raise newEl.get_adjusted_exception()
                         yield newEl
             else:
                 yield newEl
@@ -360,7 +368,7 @@ class _IStream(Iterable[_K], ABC):
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap(decorated_f_with_exc_passing, self, chunksize=bufferSize):
             if isinstance(el, _MapException):
-                raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
+                raise el.get_adjusted_exception()
             yield el
         p.close()
         p.join()
@@ -370,7 +378,7 @@ class _IStream(Iterable[_K], ABC):
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap(decorated_f_with_exc_passing, self):
             if isinstance(el, _MapException):
-                raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
+                raise el.get_adjusted_exception()
             yield el
         p.join()
 
@@ -379,7 +387,7 @@ class _IStream(Iterable[_K], ABC):
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap_unordered(decorated_f_with_exc_passing, self):
             if isinstance(el, _MapException):
-                raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
+                raise el.get_adjusted_exception()
             yield el
         p.join()
 
@@ -389,7 +397,7 @@ class _IStream(Iterable[_K], ABC):
             decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
             for el in p.imap_unordered(decorated_f_with_exc_passing, iter(self), chunksize=bufferSize):
                 if isinstance(el, _MapException):
-                    raise el.exc_info[0](el.exc_info[1]).with_traceback(el.exc_info[2])
+                    raise el.get_adjusted_exception()
                 yield el
         except GeneratorExit:
             p.terminate()

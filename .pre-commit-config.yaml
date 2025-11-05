@@ -55,3 +55,10 @@ repos:
     rev: 0.7.1
     hooks:
     - id: nbstripout
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.407
+    hooks:
+    - id: pyright
+      files: ^streamerate/
+      args: ["--project", "./pyproject.toml"]

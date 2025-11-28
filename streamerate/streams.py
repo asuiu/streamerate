@@ -42,7 +42,10 @@ from typing import (
     overload,
 )
 
-import gevent.pool
+try:
+    import gevent.pool as gpool
+except ImportError:
+    gpool = None
 
 try:
     from pydantic_core.core_schema import any_schema as pydantic_any_schema
@@ -374,7 +377,9 @@ class _IStream(Iterable[_K], ABC):
         p.join()
 
     def __gt_pool_generator(self, f: Callable[[_K], _V], poolSize: int) -> Generator[_V, None, None]:
-        p = gevent.pool.Pool(size=poolSize)
+        if not gpool:
+            raise ImportError("gevent is not installed")
+        p = gpool.Pool(size=poolSize)
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap(decorated_f_with_exc_passing, self):
             if isinstance(el, _MapException):
@@ -383,7 +388,9 @@ class _IStream(Iterable[_K], ABC):
         p.join()
 
     def __gt_fast_pool_generator(self, f: Callable[[_K], _V], poolSize: int) -> Generator[_V, None, None]:
-        p = gevent.pool.Pool(size=poolSize)
+        if not gpool:
+            raise ImportError("gevent is not installed")
+        p = gpool.Pool(size=poolSize)
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap_unordered(decorated_f_with_exc_passing, self):
             if isinstance(el, _MapException):

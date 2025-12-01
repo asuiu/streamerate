@@ -51,6 +51,9 @@ debug-auto-git-tag = "tasks:debug_auto_git_tag"
 line-length = 160
 include = '\.pyi?$'
 
+[tool.pyright]
+typeCheckingMode = "strict"
+
 [tool.pylint.master]
 #ignore="tests,test_integrations"
 ignore-patterns = ["test_.*"]

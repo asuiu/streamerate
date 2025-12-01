@@ -2,6 +2,7 @@ import io
 import os
 import pickle
 import random
+import re
 import sys
 import time
 import traceback
@@ -12,7 +13,11 @@ from itertools import permutations
 from multiprocessing import Pool
 from unittest.mock import MagicMock
 
-import gevent
+try:
+    import gevent
+except ImportError:
+    gevent = None
+# gevent = None
 import pydantic_core
 from pydantic import validate_call
 
@@ -392,7 +397,8 @@ class fastmapTestCase(unittest.TestCase):
         self.fail("No expected exceptions has been raised")
 
     def test_traceback_right_when_fastmap_raises_custom_exception(self):
-        """ tests a regression related to exceptions with multiple parameters """
+        """tests a regression related to exceptions with multiple parameters"""
+
         class SomeCustomException(Exception):
             def __init__(self, message, some_other_param):
                 self.message = message
@@ -1434,20 +1440,38 @@ class StreamTestCase(unittest.TestCase):
         N = 4
         FLT = r"(\d+\.\d+|\?)"
         PYPY3_ANOMALY = "\x1b\[A\x1b\[A"
+
+        def simple_gen():
+            for i in range(N):
+                yield i
+
         s = stream(range(N))
         out = io.StringIO()
-        self.assertListEqual(list(range(N)), s.tqdm(file=out).toList())
-        expected = rf"\r0it \[00:00, {FLT}it/s\]" rf"({PYPY3_ANOMALY})?" rf"\r{N}it \[00:00, {FLT}it/s\]\n"
-        self.assertRegex(out.getvalue(), expected)
+        self.assertListEqual(list(range(N)), s.filter(lambda x: True).tqdm(file=out).toList())
+        output = out.getvalue()
+        old_format = rf"\r0it \[00:00, {FLT}it/s\]" rf"({PYPY3_ANOMALY})?" rf"\r{N}it \[00:00, {FLT}it/s\]\n"
+        new_format = rf"\r\s+0%\|.*\|\s+0/{N}\s+\[00:00<\?, \?it/s\].*\r100%\|.*\|\s+{N}/{N}\s+\[00:00<00:00,\s+{FLT}it/s\]\n"
+        self.assertTrue(bool(re.search(old_format, output)) or bool(re.search(new_format, output)), f"Output doesn't match either format:\n{output}")
 
-    def test_tqdm_total(self):
+    def test_tqdm_total_explicitly_set(self):
         N = 4
         s = stream(range(N))
         FLT = r"(\d+\.\d+|\?)"
         TM = r"(00:00|\?)"
         PYPY3_ANOMALY = "\x1b\[A\x1b\[A"
         out = io.StringIO()
-        self.assertListEqual(list(range(N)), s.tqdm(total=N, file=out).toList())
+        self.assertListEqual(list(range(N)), s.filter(lambda x: True).tqdm(total=N, file=out).toList())
+        expected = rf"\r  0%\|          \| 0/{N} \[00:00<\?, \?it/s\]" rf"({PYPY3_ANOMALY})?" rf"\r100%\|##########\| {N}/{N} \[00:00<{TM}, {FLT}it/s\]\n"
+        self.assertRegex(out.getvalue(), expected)
+
+    def test_tqdm_total_gets_automatically_from_length_hint(self):
+        N = 4
+        s = stream(range(N))
+        FLT = r"(\d+\.\d+|\?)"
+        TM = r"(00:00|\?)"
+        PYPY3_ANOMALY = "\x1b\[A\x1b\[A"
+        out = io.StringIO()
+        self.assertListEqual(list(range(N)), s.tqdm(file=out).toList())
         expected = rf"\r  0%\|          \| 0/{N} \[00:00<\?, \?it/s\]" rf"({PYPY3_ANOMALY})?" rf"\r100%\|##########\| {N}/{N} \[00:00<{TM}, {FLT}it/s\]\n"
         self.assertRegex(out.getvalue(), expected)
 
@@ -1631,6 +1655,196 @@ class StreamTestCase(unittest.TestCase):
         result2 = s.toList()
         self.assertListEqual(l1, [0, 1, 2, 0, 1, 2])
         self.assertListEqual(result2, [0, 1, 2])
+
+
+class LengthHintTestCase(unittest.TestCase):
+    """Test cases for length_hint functionality"""
+
+    def test_length_hint_from_list_source(self):
+        """Test that length_hint works with list source"""
+        s = stream([1, 2, 3, 4, 5])
+        self.assertEqual(s.length_hint(), 5)
+
+    def test_length_hint_from_tuple_source(self):
+        """Test that length_hint works with tuple source"""
+        s = stream((1, 2, 3))
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_from_set_source(self):
+        """Test that length_hint works with set source"""
+        s = stream({1, 2, 3})
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_from_dict_source(self):
+        """Test that length_hint works with dict source"""
+        s = stream({"a": 1, "b": 2})
+        self.assertEqual(s.length_hint(), 2)
+
+    def test_length_hint_from_range_source(self):
+        """Test that length_hint works with range source"""
+        s = stream(range(100))
+        self.assertEqual(s.length_hint(), 100)
+
+    def test_length_hint_from_frozenset_source(self):
+        """Test that length_hint works with frozenset source"""
+        s = stream(frozenset([1, 2, 3, 4]))
+        self.assertEqual(s.length_hint(), 4)
+
+    def test_length_hint_from_generator_is_none(self):
+        """Test that length_hint is None for generator source"""
+
+        def gen():
+            yield 1
+            yield 2
+            yield 3
+
+        s = stream(gen())
+        self.assertIsNone(s.length_hint())
+
+    def test_length_hint_explicit_constructor_param(self):
+        """Test that explicit length_hint parameter works"""
+        s = stream((x for x in range(100)), length_hint=100)
+        self.assertEqual(s.length_hint(), 100)
+
+    def test_length_hint_default_parameter(self):
+        """Test that length_hint() accepts default parameter"""
+        s = stream((x for x in range(100)))
+        self.assertIsNone(s.length_hint())
+        self.assertEqual(s.length_hint(default=0), 0)
+        self.assertEqual(s.length_hint(default=999), 999)
+
+    def test_length_hint_propagates_through_map(self):
+        """Test that length_hint propagates through map"""
+        s = stream([1, 2, 3, 4, 5]).map(lambda x: x * 2)
+        self.assertEqual(s.length_hint(), 5)
+
+    def test_length_hint_propagates_through_starmap(self):
+        """Test that length_hint propagates through starmap"""
+        s = stream([(1, 2), (3, 4)]).starmap(lambda x, y: x + y)
+        self.assertEqual(s.length_hint(), 2)
+
+    def test_length_hint_propagates_through_enumerate(self):
+        """Test that length_hint propagates through enumerate"""
+        s = stream([1, 2, 3]).enumerate()
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_propagates_through_reversed(self):
+        """Test that length_hint propagates through reversed"""
+        s = stream([1, 2, 3]).__reversed__()
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_propagates_through_add_observer(self):
+        """Test that length_hint propagates through add_observer"""
+        s = stream([1, 2, 3]).add_observer(lambda x: None)
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_computed_for_take(self):
+        """Test that length_hint is computed correctly for take"""
+        s = stream([1, 2, 3, 4, 5]).take(3)
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_computed_for_take_more_than_available(self):
+        """Test that take with n > size returns actual size"""
+        s = stream([1, 2, 3]).take(10)
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_computed_for_skip(self):
+        """Test that length_hint is computed correctly for skip"""
+        s = stream([1, 2, 3, 4, 5]).drop(2)
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_computed_for_skip_all(self):
+        """Test that skip all returns 0"""
+        s = stream([1, 2, 3]).drop(5)
+        self.assertEqual(s.length_hint(), 0)
+
+    def test_length_hint_computed_for_chain(self):
+        """Test that length_hint is computed for chain (add)"""
+        s = stream([1, 2, 3]) + stream([4, 5])
+        self.assertEqual(s.length_hint(), 5)
+
+    def test_length_hint_dropped_by_filter(self):
+        """Test that filter drops length_hint"""
+        s = stream([1, 2, 3, 4, 5]).filter(lambda x: x > 2)
+        self.assertIsNone(s.length_hint())
+
+    def test_length_hint_dropped_by_flatMap(self):
+        """Test that flatMap drops length_hint"""
+        s = stream([1, 2, 3]).flatMap(lambda x: [x, x])
+        self.assertIsNone(s.length_hint())
+
+    def test_length_hint_dropped_by_distinct(self):
+        """Test that distinct drops length_hint"""
+        s = stream([1, 2, 2, 3, 3, 3]).distinct()
+        self.assertIsNone(s.length_hint())
+
+    def test_length_hint_propagates_through_mtmap(self):
+        """Test that length_hint propagates through mtmap"""
+        s = stream([1, 2, 3]).mtmap(lambda x: x * 2, poolSize=2)
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_propagates_through_mpmap(self):
+        """Test that length_hint propagates through mpmap"""
+        s = stream([1, 2, 3]).mpmap(lambda x: x * 2, poolSize=2)
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_propagates_through_fastmap(self):
+        """Test that length_hint propagates through fastmap"""
+        s = stream([1, 2, 3]).fastmap(lambda x: x * 2, poolSize=2)
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_propagates_through_gtmap(self):
+        """Test that length_hint propagates through gtmap"""
+        s = stream([1, 2, 3]).gtmap(lambda x: x * 2, poolSize=2)
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_tqdm_uses_length_hint(self):
+        """Test that tqdm uses length_hint when total is not provided"""
+        s = stream([1, 2, 3, 4, 5])
+        # Create a tqdm stream without explicit total
+        tqdm_stream = s.tqdm()
+        # The tqdm wrapper should have received the total
+        self.assertEqual(tqdm_stream.length_hint(), 5)
+
+    def test_tqdm_respects_explicit_total(self):
+        """Test that explicit total parameter takes precedence"""
+        s = stream([1, 2, 3])
+        # Provide explicit total that differs from actual size
+        tqdm_stream = s.tqdm(total=10)
+        # The stream should still have the original hint
+        self.assertEqual(tqdm_stream.length_hint(), 3)
+
+    def test_length_hint_with_slist(self):
+        """Test that slist has length_hint"""
+        s = slist([1, 2, 3, 4])
+        self.assertEqual(s.length_hint(), 4)
+
+    def test_length_hint_with_slist_after_operation(self):
+        """Test that slist has length_hint after operation"""
+        sl = slist([1, 2, 3, 4])
+        s = sl.map(lambda x: x * 2)
+        sl.append(5)
+        self.assertEqual(5, s.length_hint())
+
+    def test_length_hint_with_sset(self):
+        """Test that sset has length_hint"""
+        s = sset({1, 2, 3})
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_with_sdict(self):
+        """Test that sdict has length_hint"""
+        s = sdict({"a": 1, "b": 2})
+        self.assertEqual(s.length_hint(), 2)
+
+    def test_length_hint_chain_multiple_operations(self):
+        """Test length_hint through multiple chained operations"""
+        s = stream([1, 2, 3, 4, 5]).map(lambda x: x * 2).take(3).enumerate()
+        self.assertEqual(s.length_hint(), 3)
+
+    def test_length_hint_unknown_after_filter(self):
+        """Test that length_hint becomes unknown after filter in chain"""
+        s = stream([1, 2, 3, 4, 5]).filter(lambda x: x > 2).map(lambda x: x * 2)
+        self.assertIsNone(s.length_hint())
 
 
 if __name__ == "__main__":

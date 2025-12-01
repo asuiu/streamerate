@@ -7,6 +7,7 @@ import io
 import itertools
 import math
 import numbers
+import operator
 import pickle
 import struct
 import sys
@@ -81,14 +82,29 @@ def _IDENTITY_FUNC(x: _T) -> _T:
 
 
 class ItrFromFunc(Iterable[_K]):
-    def __init__(self, f: Callable[[], Iterable[_K]]):
+    def __init__(self, f: Callable[[], Iterable[_K]], length_hint: Optional[int] = None):
         if callable(f):
             self._f = f
         else:
             raise TypeError(f"Argument f to {self.__class__!s} should be callable, but f.__class__={f.__class__!s}")
+        self._length_hint = length_hint
 
     def __iter__(self) -> Iterator[_T_co]:
         return iter(self._f())
+
+    def length_hint(self, default: Optional[int] = None) -> Optional[int]:
+        """
+        Returns the length hint for this iterable, or default if unknown.
+        """
+        return self._length_hint if self._length_hint is not None else default
+
+    def __length_hint__(self) -> int:
+        """
+        Protocol method for length_hint. Raises TypeError if length is unknown.
+        """
+        if self._length_hint is None:
+            raise TypeError("length is unknown")
+        return self._length_hint
 
 
 class _EndQueue:
@@ -140,6 +156,17 @@ class _IStream(Iterable[_K], ABC):
         else:
             raise TypeError(f"Argument f to _IStream should be callable or iterable, but itr.__class__={itr.__class__!s}")
         return _itr, _f
+
+    def length_hint(self, default: Optional[int] = None) -> Optional[int]:
+        """Returns the length hint for this stream, or default if unknown."""
+        try:
+            return self.__length_hint__()
+        except (TypeError, AttributeError):
+            verified_default = default if default is not None else -1
+            res = operator.length_hint(self, verified_default)
+            if res != -1:
+                return res
+            return default
 
     @staticmethod
     def __fastmap_thread(f, qin, qout):
@@ -433,10 +460,10 @@ class _IStream(Iterable[_K], ABC):
             yield el
 
     def map(self, f: Callable[[_K], _V]) -> "stream[_V]":
-        return stream(partial(map, f, self))
+        return stream(partial(map, f, self), source=self)
 
     def starmap(self, f: Callable[[_K], _V]) -> "stream[_V]":
-        return stream(partial(itertools.starmap, f, self))
+        return stream(partial(itertools.starmap, f, self), source=self)
 
     def mpmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
         """
@@ -454,7 +481,7 @@ class _IStream(Iterable[_K], ABC):
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
             raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
-        return stream(self.__mp_pool_generator(f, poolSize, bufferSize))
+        return stream(self.__mp_pool_generator(f, poolSize, bufferSize), source=self)
 
     def mpstarmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
         """
@@ -480,7 +507,7 @@ class _IStream(Iterable[_K], ABC):
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
             raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
-        return stream(self.__mp_fast_pool_generator(f, poolSize, bufferSize))
+        return stream(self.__mp_fast_pool_generator(f, poolSize, bufferSize), source=self)
 
     @staticmethod
     def _star_mapper(f, el):
@@ -511,7 +538,7 @@ class _IStream(Iterable[_K], ABC):
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
             raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
-        return stream(ItrFromFunc(lambda: self.__fastmap_generator(f, poolSize, bufferSize)))
+        return stream(ItrFromFunc(lambda: self.__fastmap_generator(f, poolSize, bufferSize), length_hint=self.length_hint()))
 
     def faststarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
         """
@@ -540,7 +567,7 @@ class _IStream(Iterable[_K], ABC):
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
             raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
-        return stream(ItrFromFunc(lambda: self.__mtmap_generator(f, poolSize, bufferSize)))
+        return stream(ItrFromFunc(lambda: self.__mtmap_generator(f, poolSize, bufferSize), length_hint=self.length_hint()))
 
     def gtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count()) -> "stream[_V]":
         """
@@ -556,7 +583,7 @@ class _IStream(Iterable[_K], ABC):
         if poolSize == 1:
             return self.map(f)
 
-        return stream(ItrFromFunc(lambda: self.__gt_pool_generator(f, poolSize)))
+        return stream(ItrFromFunc(lambda: self.__gt_pool_generator(f, poolSize), length_hint=self.length_hint()))
 
     def gtfastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count()) -> "stream[_V]":
         """
@@ -572,7 +599,7 @@ class _IStream(Iterable[_K], ABC):
         if poolSize == 1:
             return self.map(f)
 
-        return stream(ItrFromFunc(lambda: self.__gt_fast_pool_generator(f, poolSize)))
+        return stream(ItrFromFunc(lambda: self.__gt_fast_pool_generator(f, poolSize), length_hint=self.length_hint()))
 
     def mtstarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
         """
@@ -611,7 +638,7 @@ class _IStream(Iterable[_K], ABC):
         return f(self)
 
     def enumerate(self) -> "stream[Tuple[int,_K]]":
-        return stream(zip(range(0, sys.maxsize), self))
+        return stream(zip(range(0, sys.maxsize), self), source=self)
 
     def flatMap(self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC) -> "stream[_V]":
         """
@@ -692,7 +719,7 @@ class _IStream(Iterable[_K], ABC):
         :param f: f is observer that will receive elements of self collection and return None
         :return: will return stream of objects of the same type of elements from the stream
         """
-        return stream(ItrFromFunc(lambda: self.__add_observer_generator(f)))
+        return stream(ItrFromFunc(lambda: self.__add_observer_generator(f), length_hint=self.length_hint()))
 
     def filter(self, predicate: Optional[Callable[[_K], bool]] = None) -> "stream[_K]":
         """
@@ -929,15 +956,26 @@ class _IStream(Iterable[_K], ABC):
     def __add__(self, other) -> "stream[_K]":
         if not isinstance(other, (ItrFromFunc, stream)):
             othItr = stream(lambda: other)
+            other_len = operator.length_hint(other, -1)
+            if other_len == -1:
+                other_len = None
         else:
             othItr = other
+            other_len = other.length_hint()
         if isinstance(self._itr, (ItrFromFunc, stream)):
             i = self._itr
         elif self._itr is None:
             i = ItrFromFunc(self._f)
         else:
             i = ItrFromFunc(lambda: self._itr)
-        return stream(partial(itertools.chain.from_iterable, (i, othItr)))
+
+        # Compute combined length hint
+        self_hint = self.length_hint()
+        combined_hint = None
+        if self_hint is not None and other_len is not None:
+            combined_hint = self_hint + other_len
+
+        return stream(partial(itertools.chain.from_iterable, (i, othItr)), length_hint=combined_hint)
 
     def __iadd__(self, other) -> "stream[_K]":
         if not isinstance(other, (ItrFromFunc, stream)):
@@ -1017,9 +1055,13 @@ class _IStream(Iterable[_K], ABC):
                         break
             other_gen.close()
 
+        # Compute new length hint
+        original_hint = self.length_hint()
+        new_hint = min(n, original_hint) if original_hint is not None else None
+
         if isinstance(self._itr, GeneratorType):
-            return stream(gen(self._itr, n))
-        return self[:n]
+            return stream(gen(self._itr, n), length_hint=new_hint)
+        return stream(self[:n], length_hint=new_hint)
 
     def takeWhile(self, predicate: Callable[[_K], bool]) -> "stream[_K]":
         def gen(other_gen: Union[GeneratorType, Iterable[_K]], pred: Callable[[_K], bool]):
@@ -1046,7 +1088,11 @@ class _IStream(Iterable[_K], ABC):
         this stream. If there aren't enough elements then the new stream
         is empty. This stream itself is not mutated.
         """
-        s = stream(self)
+        # Compute new length hint
+        original_hint = self.length_hint()
+        new_hint = max(0, original_hint - n) if original_hint is not None else None
+
+        s = stream(self, length_hint=new_hint)
 
         for _ in range(n):
             try:
@@ -1093,7 +1139,7 @@ class _IStream(Iterable[_K], ABC):
         return sum(self.map(predicate))
 
     def pad_with(self, pad: Any) -> "stream[Union[Any,_K]]":
-        """Returns the sequence elements and then returns None indefinitely.
+        """Returns the sequence elements and then returns pad indefinitely.
 
         Useful for emulating the behavior of the built-in map() function.
         """
@@ -1298,11 +1344,15 @@ class _IStream(Iterable[_K], ABC):
         :param kwargs: Params to be sent to tqdm()
         :return: self stream
         """
+        # Use length_hint if total is not provided
+        len_hint = self.length_hint()
+        effective_total = total if total is not None else len_hint
+
         return stream(
             tqdm(
                 iterable=self,
                 desc=desc,
-                total=total,
+                total=effective_total,
                 leave=leave,
                 file=file,
                 ncols=ncols,
@@ -1318,7 +1368,8 @@ class _IStream(Iterable[_K], ABC):
                 postfix=postfix,
                 gui=gui,
                 **kwargs,
-            )
+            ),
+            length_hint=len_hint,
         )
 
     def throttle(self, max_req: int, interval: float) -> "stream[_K]":
@@ -1412,8 +1463,15 @@ class _PydanticCoercingValidated:
 
 
 class stream(_IStream, Iterable[_K], _PydanticCoercingValidated):
-    def __init__(self, itr: Optional[Union[Iterable[_K], Iterator[_K], Callable[[], Iterable[_K]]]] = None):
+    def __init__(
+        self,
+        itr: Optional[Union[Iterable[_K], Iterator[_K], Callable[[], Iterable[_K]]]] = None,
+        length_hint: Optional[int] = None,
+        source: Optional["stream"] = None,
+    ):
         self._itr, self._f = self._init_itr(itr)
+        self._length_hint = length_hint
+        self._source = source  # Reference to source stream for dynamic length computation
 
     def __iter__(self) -> Iterator[_K]:
         return iter(self.__get_itr())
@@ -1433,11 +1491,32 @@ class stream(_IStream, Iterable[_K], _PydanticCoercingValidated):
             return str(self._itr)
         return object.__str__(self)
 
+    def __length_hint__(self) -> int:
+        """
+        Protocol method for length_hint. Raises TypeError if length is unknown.
+        This is compatible with Python's length_hint protocol and operator.length_hint().
+        """
+        if self._length_hint is not None:
+            return self._length_hint
+
+        source = self._source if self._source is not None else self._itr
+        if source is not None:
+            if isinstance(source, stream):
+                result = source.length_hint(default=-1)
+                if result != -1:
+                    return result
+            else:
+                len_hint = operator.length_hint(source, -1)
+                if len_hint != -1:
+                    return len_hint
+
+        raise TypeError("length is unknown")
+
     def __reversed__(self) -> "stream[_K]":
         try:
-            return stream(reversed(self.__get_itr()))
+            return stream(reversed(self.__get_itr()), source=self)
         except TypeError:
-            return stream(lambda: reversed(self.toList()))
+            return stream(lambda: reversed(self.toList()), source=self)
 
     @staticmethod
     def __binaryChunksStreamGenerator(fs, format="<L", statHandler: Optional[Callable[[int, int], None]] = None):
@@ -1712,48 +1791,8 @@ class slist(List[_K], stream):
             return stream(self) + x
         return slist(super().__add__(x))
 
-    # pylint: disable=too-many-arguments
-    def tqdm(
-        self,
-        desc: Optional[str] = None,
-        total: Optional[int] = None,
-        leave: bool = True,
-        file: Optional[io.TextIOWrapper] = None,
-        ncols: Optional[int] = None,
-        mininterval: float = 0.1,
-        maxinterval: float = 10.0,
-        ascii: Optional[Union[str, bool]] = None,  # pylint: disable=redefined-builtin
-        unit: str = "it",
-        unit_scale: Optional[Union[bool, int, float]] = False,
-        dynamic_ncols: Optional[bool] = False,
-        smoothing: Optional[float] = 0.3,
-        initial: int = 0,
-        position: Optional[int] = None,
-        postfix: Optional[dict] = None,
-        gui: bool = False,
-        **kwargs,
-    ) -> "stream[_K]":
-        if total is None:
-            total = self.size()
-        return super().tqdm(
-            desc,
-            total,
-            leave,
-            file,
-            ncols,
-            mininterval,
-            maxinterval,
-            ascii,
-            unit,
-            unit_scale,
-            dynamic_ncols,
-            smoothing,
-            initial,
-            position,
-            postfix,
-            gui,
-            **kwargs,
-        )
+    def __length_hint__(self) -> int:
+        return len(self)
 
 
 class sdict(Dict[_K, _V], dict, _IStream):
@@ -1786,48 +1825,8 @@ class sdict(Dict[_K, _V], dict, _IStream):
     def copy(self) -> "sdict[_K,_V]":
         return sdict(self.items())
 
-    # pylint: disable=too-many-arguments
-    def tqdm(
-        self,
-        desc: Optional[str] = None,
-        total: Optional[int] = None,
-        leave: bool = True,
-        file: Optional[io.TextIOWrapper] = None,
-        ncols: Optional[int] = None,
-        mininterval: float = 0.1,
-        maxinterval: float = 10.0,
-        ascii: Optional[Union[str, bool]] = None,  # pylint: disable=redefined-builtin
-        unit: str = "it",
-        unit_scale: Optional[Union[bool, int, float]] = False,
-        dynamic_ncols: Optional[bool] = False,
-        smoothing: Optional[float] = 0.3,
-        initial: int = 0,
-        position: Optional[int] = None,
-        postfix: Optional[dict] = None,
-        gui: bool = False,
-        **kwargs,
-    ) -> "stream[_K]":
-        if total is None:
-            total = self.size()
-        return super().tqdm(
-            desc,
-            total,
-            leave,
-            file,
-            ncols,
-            mininterval,
-            maxinterval,
-            ascii,
-            unit,
-            unit_scale,
-            dynamic_ncols,
-            smoothing,
-            initial,
-            position,
-            postfix,
-            gui,
-            **kwargs,
-        )
+    def __length_hint__(self) -> int:
+        return len(self)
 
 
 class defaultstreamdict(sdict):
@@ -1877,6 +1876,9 @@ class defaultstreamdict(sdict):
 
     def __str__(self) -> str:
         return dict.__str__(self)
+
+    def __length_hint__(self) -> int:
+        return len(self)
 
 
 def smap(f, itr: Iterable[_K]) -> stream[_K]:

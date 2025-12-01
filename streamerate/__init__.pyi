@@ -1,6 +1,8 @@
 # Type stub for streamerate
 # Author: ASU --<andrei.suiu@gmail.com>
 
+import io
+from numbers import Real
 from typing import (
     AbstractSet,
     Any,
@@ -21,8 +23,6 @@ from typing import (
     Union,
     overload,
 )
-from numbers import Real
-import io
 
 _K = TypeVar("_K")
 _K2 = TypeVar("_K2")
@@ -32,8 +32,10 @@ _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
 
 class ItrFromFunc(Iterable[_K]):
-    def __init__(self, f: Callable[[], Iterable[_K]]) -> None: ...
+    def __init__(self, f: Callable[[], Iterable[_K]], length_hint: Optional[int] = None) -> None: ...
     def __iter__(self) -> Iterator[_K]: ...
+    def length_hint(self, default: Optional[int] = None) -> Optional[int]: ...
+    def __length_hint__(self) -> int: ...
 
 class TqdmMapper:
     def __init__(self, *args: Any, **kwargs: Any) -> None: ...
@@ -43,8 +45,12 @@ class stream(Iterable[_K]):
     def __init__(
         self,
         itr: Optional[Union[Iterable[_K], Iterator[_K], Callable[[], Iterable[_K]]]] = None,
+        length_hint: Optional[int] = None,
+        source: Optional["stream[Any]"] = None,
     ) -> None: ...
     def __iter__(self) -> Iterator[_K]: ...
+    def __length_hint__(self) -> int: ...
+    def length_hint(self, default: Optional[int] = None) -> Optional[int]: ...
     def __reversed__(self) -> stream[_K]: ...
     @overload
     def __getitem__(self, i: slice) -> stream[_K]: ...

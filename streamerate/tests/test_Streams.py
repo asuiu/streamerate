@@ -11,6 +11,7 @@ from functools import partial
 from io import BytesIO
 from itertools import permutations
 from multiprocessing import Pool
+from typing import Generator
 from unittest.mock import MagicMock
 
 try:
@@ -907,6 +908,21 @@ class StreamTestCase(unittest.TestCase):
         self.assertAlmostEqual(stream((0, 1, 2, 3)).filter(lambda x: x > 0).entropy(), 1.4591479)
         self.assertEqual(stream([(1, 2), (3, 4)]).zip().toList(), [(1, 3), (2, 4)])
 
+    def test_entropy(self):
+        s = stream([])
+        self.assertEqual(s.entropy(), 0.0)
+
+        s = slist([1, -1])
+        with self.assertRaises(ValueError):
+            s.entropy()
+
+        s = slist([-1, 0, 1])
+        with self.assertRaises(ValueError):
+            s.entropy()
+
+        s = slist([1, 2, 3, 4, 5])
+        self.assertAlmostEqual(s.entropy(), 2.1492553971685)
+
     def test_filterFromGeneratorReinstantiatesProperly(self):
         s = stream(lambda: (i for i in xrange(5)))
         s = s.filter(lambda e: e % 2 == 0)
@@ -1616,11 +1632,35 @@ class StreamTestCase(unittest.TestCase):
         self.assertSetEqual(set(df.columns), {"name", "age"})
         self.assertListEqual(list(df["name"]), ["Alice", "Bob"])
 
-    def test_map_stream(self):
+    def test_into(self):
         s = stream((("a", 2), (3, 4)))
-        d = s.map_stream(dict)
+        d = s.into(dict)
         self.assertIsInstance(d, dict)
         self.assertDictEqual(d, {"a": 2, 3: 4})
+
+    def test_into_with_function(self):
+        s = stream(range(5))
+        t = s.into(tuple)
+        self.assertIsInstance(t, tuple)
+        self.assertTupleEqual(t, (0, 1, 2, 3, 4))
+
+    def test_via(self):
+        s = stream(range(5))
+
+        def _simple_generator(it) -> Generator[int, None, None]:
+            for x in it:
+                yield x
+                if x % 2 == 0:
+                    yield x * x
+
+        res = s.via(_simple_generator).into(slist)
+        self.assertIsInstance(res, slist)
+        self.assertListEqual(res, [0, 0, 1, 2, 4, 3, 4, 16])
+
+        f = lambda x: x.map(lambda y: y * 2).filter(lambda y: y > 5)
+        res = s.via(f).toList()
+        self.assertIsInstance(res, stream)
+        self.assertListEqual(res.toList(), [6, 8])
 
     def test_for_each_nominal(self):
         l = []

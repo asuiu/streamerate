@@ -6,6 +6,7 @@ import copy
 import io
 import itertools
 import math
+import multiprocessing
 import numbers
 import operator
 import pickle
@@ -32,6 +33,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     Mapping,
     MutableSet,
     NamedTuple,
@@ -75,6 +77,8 @@ _V = TypeVar("_V")
 _V2 = TypeVar("_V2")
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
+
+tqdm.monitor_interval = 0  # disables TMonitor thread
 
 
 def _IDENTITY_FUNC(x: _T) -> _T:
@@ -393,8 +397,11 @@ class _IStream(Iterable[_K], ABC):
             pickling_support.install(e)
             return _MapException(sys.exc_info())
 
-    def _mp_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int) -> Generator[_V, None, None]:
-        p = Pool(poolSize)
+    def _mp_pool_generator(
+        self, f: Callable[[_K], _V], poolSize: int, bufferSize: int, start_method: Literal["spawn", "fork", "forkserver"]
+    ) -> Generator[_V, None, None]:
+        ctx = multiprocessing.get_context(start_method)
+        p = ctx.Pool(poolSize)
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap(decorated_f_with_exc_passing, self, chunksize=bufferSize):
             if isinstance(el, _MapException):
@@ -425,8 +432,11 @@ class _IStream(Iterable[_K], ABC):
             yield el
         p.join()
 
-    def _mp_fast_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int) -> Generator[_V, None, None]:
-        p = Pool(poolSize)
+    def _mp_fast_pool_generator(
+        self, f: Callable[[_K], _V], poolSize: int, bufferSize: int, start_method: Literal["spawn", "fork", "forkserver"]
+    ) -> Generator[_V, None, None]:
+        ctx = multiprocessing.get_context(start_method)
+        p = ctx.Pool(poolSize)
         try:
             decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
             for el in p.imap_unordered(decorated_f_with_exc_passing, iter(self), chunksize=bufferSize):
@@ -465,15 +475,25 @@ class _IStream(Iterable[_K], ABC):
     def starmap(self: "stream[_K]", f: Callable[[_K], _V]) -> "stream[_V]":
         return stream(partial(itertools.starmap, f, self), source=self)
 
-    def mpmap(self: "stream[_K]", f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
+    def mpmap(
+        self: "stream[_K]",
+        f: Callable[[_K], _V],
+        poolSize: int = cpu_count(),
+        bufferSize: Optional[int] = 1,
+        start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
+    ) -> "stream[_V]":
         """
         Parallel ordered map using multiprocessing.Pool.imap
         :param poolSize: number of processes in Pool
         :param bufferSize: passed as chunksize param to imap()
+        :param start_method: multiprocessing start method to use for new processes
         """
         # Validations
         if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
             raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize}")
+        available_start_methods = multiprocessing.get_all_start_methods()
+        if start_method not in available_start_methods:
+            raise ValueError(f"start_method should be one of {available_start_methods}. Received: {start_method!s}")
         if poolSize == 1:
             return self.map(f)
         if bufferSize is None:
@@ -481,26 +501,43 @@ class _IStream(Iterable[_K], ABC):
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
             raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
-        return stream(self._mp_pool_generator(f, poolSize, bufferSize), source=self)
+        return stream(self._mp_pool_generator(f, poolSize, bufferSize, start_method), source=self)
 
-    def mpstarmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
+    def mpstarmap(
+        self,
+        f: Callable[[_K], _V],
+        poolSize: int | Pool = cpu_count(),
+        bufferSize: int | None = 1,
+        start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
+    ) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
         :param f: function to apply
         :param poolSize: number of processes in Pool
         :param bufferSize: passed as chunksize param to imap_unordered(), so it default to 1 as imap_unordered
+        :param start_method: multiprocessing start method to use for new processes
         """
-        return self.mpmap(partial(self._star_mapper, f), poolSize, bufferSize)
+        return self.mpmap(partial(self._star_mapper, f), poolSize, bufferSize, start_method)
 
-    def mpfastmap(self: "stream[_K]", f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
+    def mpfastmap(
+        self: "stream[_K]",
+        f: Callable[[_K], _V],
+        poolSize: int | Pool = cpu_count(),
+        bufferSize: int = 1,
+        start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
+    ) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
         :param poolSize: number of processes in Pool
         :param bufferSize: passed as chunksize param to imap_unordered(), so it default to 1 as imap_unordered
+        :param start_method: multiprocessing start method to use for new processes
         """
         # Validations
         if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
             raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+        available_start_methods = multiprocessing.get_all_start_methods()
+        if start_method not in available_start_methods:
+            raise ValueError(f"start_method should be one of {available_start_methods}. Received: {start_method!s}")
         if poolSize == 1:
             return self.map(f)
         if bufferSize is None:
@@ -508,19 +545,26 @@ class _IStream(Iterable[_K], ABC):
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
             raise ValueError(f"bufferSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
 
-        return stream(self._mp_fast_pool_generator(f, poolSize, bufferSize), source=self)
+        return stream(self._mp_fast_pool_generator(f, poolSize, bufferSize, start_method), source=self)
 
     @staticmethod
     def _star_mapper(f, el):
         return f(*el)
 
-    def mpfaststarmap(self, f: Callable[[_K], _V], poolSize: Union[int, Pool] = cpu_count(), bufferSize: Optional[int] = 1) -> "stream[_V]":
+    def mpfaststarmap(
+        self,
+        f: Callable[[_K], _V],
+        poolSize: Union[int, Pool] = cpu_count(),
+        bufferSize: Optional[int] = 1,
+        start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
+    ) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
         :param poolSize: number of processes in Pool
         :param bufferSize: passed as chunksize param to imap_unordered(), so it default to 1 as imap_unordered
+        :param start_method: multiprocessing start method to use for new processes
         """
-        return self.mpfastmap(partial(_IStream._star_mapper, f), poolSize, bufferSize)
+        return self.mpfastmap(partial(_IStream._star_mapper, f), poolSize, bufferSize, start_method)
 
     def fastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
         """
@@ -730,6 +774,12 @@ class _IStream(Iterable[_K], ABC):
         :param predicate: If predicate is None, return the items that are true.
         """
         return stream(ItrFromFunc(lambda: filter(predicate, self)))
+
+    def filterfalse(self, predicate: Optional[Callable[[_K], bool]] = None) -> "stream[_K]":
+        """
+        :param predicate: If predicate is None, return the items that are true.
+        """
+        return stream(ItrFromFunc(lambda: itertools.filterfalse(predicate, self)))
 
     def starfilter(self, predicate: Callable[[_K], bool]) -> "stream[_K]":
         """

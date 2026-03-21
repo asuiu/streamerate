@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: check-ast
       - id: check-case-conflict
@@ -19,19 +19,19 @@ repos:
       - id: requirements-txt-fixer
 
   - repo: https://github.com/psf/black
-    rev: 24.8.0 # Replace by any tag/version: https://github.com/psf/black/tags
+    rev: 26.3.1 # Replace by any tag/version: https://github.com/psf/black/tags
     hooks:
       - id: black
         language_version: python3 # Should be a command that runs python3.6+
 
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 8.0.1
     hooks:
       - id: isort
         args: ["--profile", "black"]
 
   - repo: https://github.com/pycqa/pylint
-    rev: v3.2.6
+    rev: v4.0.5
     hooks:
       - id: pylint
 
@@ -46,12 +46,12 @@ repos:
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     # Ruff version.
-    rev: 'v0.6.2'
+    rev: 'v0.15.7'
     hooks:
       - id: ruff
         args: [--exit-non-zero-on-fix] # don't use --fix as it corrupts the files
 
   - repo: https://github.com/kynan/nbstripout
-    rev: 0.7.1
+    rev: 0.9.1
     hooks:
     - id: nbstripout

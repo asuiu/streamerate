@@ -472,7 +472,7 @@ class _IStream(Iterable[_K], ABC):
     def map(self: "stream[_K]", f: Callable[[_K], _V]) -> "stream[_V]":
         return stream(partial(map, f, self), source=self)
 
-    def starmap(self: "stream[_K]", f: Callable[[_K], _V]) -> "stream[_V]":
+    def starmap(self: "stream[Iterable[_K|Any]]", f: Callable[[_K | Any, ...], _V]) -> "stream[_V]":
         return stream(partial(itertools.starmap, f, self), source=self)
 
     def mpmap(
@@ -504,8 +504,8 @@ class _IStream(Iterable[_K], ABC):
         return stream(self._mp_pool_generator(f, poolSize, bufferSize, start_method), source=self)
 
     def mpstarmap(
-        self,
-        f: Callable[[_K], _V],
+        self: "stream[Iterable[_K|Any]]",
+        f: Callable[[_K | Any, ...], _V],
         poolSize: int | Pool = cpu_count(),
         bufferSize: int | None = 1,
         start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
@@ -552,8 +552,8 @@ class _IStream(Iterable[_K], ABC):
         return f(*el)
 
     def mpfaststarmap(
-        self,
-        f: Callable[[_K], _V],
+        self: "stream[Iterable[_K|Any]]",
+        f: Callable[[_K | Any, ...], _V],
         poolSize: Union[int, Pool] = cpu_count(),
         bufferSize: Optional[int] = 1,
         start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
@@ -585,7 +585,9 @@ class _IStream(Iterable[_K], ABC):
 
         return stream(ItrFromFunc(lambda: self.__fastmap_generator(f, poolSize, bufferSize), length_hint=self.length_hint()))
 
-    def faststarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
+    def faststarmap(
+        self: "stream[Iterable[_K|Any]]", f: Callable[[_K | Any, ...], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None
+    ) -> "stream[_V]":
         """
         Parallel unordered starmap using multithreaded pool.
         It spawns at most poolSize threads and applies the f function.
@@ -747,13 +749,22 @@ class _IStream(Iterable[_K], ABC):
 
         Example:
 
-            >>> stream(...).tap(print).map(...).tap(print).toList()
+            >>> stream([1,2]).tap(print).map(lambda x: x*2).tap(print).toList()
+            1
+            2
+            2
+            4
+            [2, 4]
 
         will print the stream twice, before and after the map.
 
         Use a `functools.partial`  to pass additional keyword arguments:
 
-            >>> stream(...).tap(partial(print, sep=' ')).map(...).toList()
+            >>> stream([1,2,3]).tap(partial(print, sep=' ')).map(lambda x: x*2).toList()
+            1
+            2
+            3
+            [2, 4, 6]
         """
 
         def tap_f(x):
@@ -781,7 +792,7 @@ class _IStream(Iterable[_K], ABC):
         """
         return stream(ItrFromFunc(lambda: itertools.filterfalse(predicate, self)))
 
-    def starfilter(self, predicate: Callable[[_K], bool]) -> "stream[_K]":
+    def starfilter(self: "stream[_K]", predicate: Callable[[_K | Any, ...], bool]) -> "stream[_K]":
         """
         :param predicate:  Applies predicate unpacks the current item when calling predicate function.
             If predicate is None, returns the items that are true,
@@ -1448,12 +1459,13 @@ class _IStream(Iterable[_K], ABC):
         :return: throttled stream
 
         Example:
-            ```py
-            >>> s = Stream()
+            >>> s = stream([1,2,3])
             >>> throttled_stream = s.throttle(10, 1.5)
             >>> for item in throttled_stream:
             ...     print(item)
-            ```
+            1
+            2
+            3
         """
         throttler = Throttler(max_req, interval)
         return self.map(throttler.throttle)
@@ -1805,7 +1817,7 @@ class slist(List[_K], stream):
     def _itr(self):
         return ItrFromFunc(lambda: iter(self))
 
-    # pylint: disable=super-init-not-called, non-parent-init-called
+    # pylint: disable=super-init-notcalled, non-parent-init-called
     def __init__(self, *args, **kwrds):
         list.__init__(self, *args, **kwrds)
 

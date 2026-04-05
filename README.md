@@ -153,6 +153,25 @@ Because of CPython [GIL](https://wiki.python.org/moin/GlobalInterpreterLock) it'
 
 :rtype: `stream`
 
+##### **Ordered helper parallelism**
+The ordered helper methods `mapKeys`, `mapValues`, `filterKeys`, `filterValues`, `filter`, `filterfalse`, `starfilter`, `tap`, and `for_each`
+accept `parallel=` with one of:
+
+- `None` for sequential execution (default)
+- `Threads(poolSize, bufferSize=None)` for ordered multithreaded execution
+- `Procs(poolSize, bufferSize=None, start_method=_StartMethod.SPAWN)` for ordered multiprocessing execution
+
+When `bufferSize` is omitted, `Parallelism` sets it to `poolSize * 2`.
+
+```python
+from streamerate import Procs, Threads, _StartMethod, stream
+
+stream({"a": 1, "b": 2}.items()).mapKeys(str.upper, parallel=Threads(4)).toMap()
+stream(range(10)).filter(lambda x: x % 2 == 0, parallel=Procs(4, start_method=_StartMethod.SPAWN)).toList()
+```
+
+For `tap` and `for_each`, the output order is still preserved, but side effects may happen out of order. With `Procs(...)`, side effects run in worker processes.
+
 ##### **gtmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count())**
 
 ##### **flatMap(predicate=_IDENTITY_FUNC)**

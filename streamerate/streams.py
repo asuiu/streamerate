@@ -1,6 +1,8 @@
 # Author: ASU --<andrei.suiu@gmail.com>
 # Purpose: utility library for >=Python3.8
 # pylint: disable=too-many-lines
+from __future__ import annotations
+
 import collections
 import copy
 import io
@@ -15,6 +17,8 @@ import sys
 import threading
 from abc import ABC, abstractmethod
 from collections import abc, defaultdict
+from dataclasses import dataclass
+from enum import StrEnum
 from functools import partial, reduce
 from itertools import groupby
 from multiprocessing import cpu_count
@@ -83,6 +87,75 @@ tqdm.monitor_interval = 0  # disables TMonitor thread
 
 def _IDENTITY_FUNC(x: _T) -> _T:
     return x
+
+
+class _StartMethod(StrEnum):
+    SPAWN = "spawn"
+    FORK = "fork"
+    FORKSERVER = "forkserver"
+
+
+def _validate_pool_size(poolSize: int) -> None:
+    if not isinstance(poolSize, int) or poolSize < 2 or poolSize > 2**12:
+        raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+
+
+@dataclass(frozen=True, slots=True)
+class Parallelism:
+    poolSize: int
+    bufferSize: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        _validate_pool_size(self.poolSize)
+        if self.bufferSize is None:
+            object.__setattr__(self, "bufferSize", self.poolSize * 2)
+
+
+@dataclass(frozen=True, slots=True)
+class Threads(Parallelism):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class Procs(Parallelism):
+    start_method: _StartMethod = _StartMethod.SPAWN
+
+    def __post_init__(self) -> None:
+        Parallelism.__post_init__(self)
+        if not isinstance(self.start_method, _StartMethod):
+            raise ValueError(f"start_method should be an instance of _StartMethod. Received: {self.start_method!r}")
+        available_start_methods = multiprocessing.get_all_start_methods()
+        if self.start_method.value not in available_start_methods:
+            raise ValueError(f"start_method should be one of {available_start_methods}. Received: {self.start_method!s}")
+
+
+def _map_key(f: Callable[[_K], _K2], kv: Tuple[_K, _V]) -> Tuple[_K2, _V]:
+    return f(kv[0]), kv[1]
+
+
+def _map_value(f: Callable[[_V], _V2], kv: Tuple[_K, _V]) -> Tuple[_K, _V2]:
+    return kv[0], f(kv[1])
+
+
+def _pair_with_predicate_result(predicate: Optional[Callable[[_K], bool]], el: _K) -> Tuple[_K, bool]:
+    return el, bool(el) if predicate is None else predicate(el)
+
+
+def _pair_with_key_predicate_result(predicate: Callable[[_K], bool], kv: Tuple[_K, _V]) -> Tuple[Tuple[_K, _V], bool]:
+    return kv, predicate(kv[0])
+
+
+def _pair_with_value_predicate_result(predicate: Callable[[_V], bool], kv: Tuple[_K, _V]) -> Tuple[Tuple[_K, _V], bool]:
+    return kv, predicate(kv[1])
+
+
+def _pair_with_star_predicate_result(predicate: Callable[..., bool], el: Iterable[Any]) -> Tuple[Iterable[Any], bool]:
+    return el, predicate(*el)
+
+
+def _tap_mapper(f: Callable[[_K], Any], el: _K) -> _K:
+    f(el)
+    return el
 
 
 class ItrFromFunc(Iterable[_K]):
@@ -171,6 +244,22 @@ class _IStream(Iterable[_K], ABC):
             if res != -1:
                 return res
             return default
+
+    def _ordered_parallel_map(self, f: Callable[[_K], _V], parallel: Parallelism) -> "stream[_V]":
+        if isinstance(parallel, Threads):
+            return self.mtmap(f, poolSize=parallel.poolSize, bufferSize=parallel.bufferSize)
+        if isinstance(parallel, Procs):
+            return self.mpmap(f, poolSize=parallel.poolSize, bufferSize=parallel.bufferSize, start_method=parallel.start_method.value)
+        raise ValueError(f"parallel should be None, Threads(...), or Procs(...). Received: {parallel!r}")
+
+    @staticmethod
+    def _matching_pair_items(itr: Iterable[Tuple[_K, bool]], keep: bool) -> Iterator[_K]:
+        for el, predicate_result in itr:
+            if predicate_result == keep:
+                yield el
+
+    def _ordered_parallel_filter(self, f: Callable[[_K], Tuple[_K, bool]], parallel: Parallelism, keep: bool = True) -> "stream[_K]":
+        return stream(ItrFromFunc(lambda: self._matching_pair_items(self._ordered_parallel_map(f, parallel), keep), length_hint=self.length_hint()))
 
     @staticmethod
     def __fastmap_thread(f, qin, qout):
@@ -489,13 +578,12 @@ class _IStream(Iterable[_K], ABC):
         :param start_method: multiprocessing start method to use for new processes
         """
         # Validations
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
-            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize}")
+        if poolSize == 1:
+            return self.map(f)
+        _validate_pool_size(poolSize)
         available_start_methods = multiprocessing.get_all_start_methods()
         if start_method not in available_start_methods:
             raise ValueError(f"start_method should be one of {available_start_methods}. Received: {start_method!s}")
-        if poolSize == 1:
-            return self.map(f)
         if bufferSize is None:
             bufferSize = poolSize * 2
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
@@ -533,13 +621,12 @@ class _IStream(Iterable[_K], ABC):
         :param start_method: multiprocessing start method to use for new processes
         """
         # Validations
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
-            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
+        if poolSize == 1:
+            return self.map(f)
+        _validate_pool_size(poolSize)
         available_start_methods = multiprocessing.get_all_start_methods()
         if start_method not in available_start_methods:
             raise ValueError(f"start_method should be one of {available_start_methods}. Received: {start_method!s}")
-        if poolSize == 1:
-            return self.map(f)
         if bufferSize is None:
             bufferSize = poolSize * 2
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
@@ -574,10 +661,9 @@ class _IStream(Iterable[_K], ABC):
         It's most usefull for I/O or CPU intensive consuming functions.
         :param poolSize: number of threads to spawn
         """
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
-            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
         if poolSize == 1:
             return self.map(f)
+        _validate_pool_size(poolSize)
         if bufferSize is None:
             bufferSize = poolSize
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
@@ -605,10 +691,9 @@ class _IStream(Iterable[_K], ABC):
         It's most usefull for I/O or CPU intensive consuming functions.
         :param poolSize: number of threads to spawn
         """
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
-            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
         if poolSize == 1:
             return self.map(f)
+        _validate_pool_size(poolSize)
         if bufferSize is None:
             bufferSize = poolSize
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
@@ -625,11 +710,9 @@ class _IStream(Iterable[_K], ABC):
 
         :param poolSize: number of greenlets in Pool
         """
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
-            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
         if poolSize == 1:
             return self.map(f)
-
+        _validate_pool_size(poolSize)
         return stream(ItrFromFunc(lambda: self.__gt_pool_generator(f, poolSize), length_hint=self.length_hint()))
 
     def gtfastmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count()) -> "stream[_V]":
@@ -641,11 +724,9 @@ class _IStream(Iterable[_K], ABC):
 
         :param poolSize: number of greenlets in Pool
         """
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
-            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
         if poolSize == 1:
             return self.map(f)
-
+        _validate_pool_size(poolSize)
         return stream(ItrFromFunc(lambda: self.__gt_fast_pool_generator(f, poolSize), length_hint=self.length_hint()))
 
     def mtstarmap(self, f: Callable[[_K], _V], poolSize: int = cpu_count(), bufferSize: Optional[int] = None) -> "stream[_V]":
@@ -668,13 +749,22 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.gtmap(lambda el: f(*el), poolSize)
 
+    @overload
+    def fastFlatMap(self, predicate: Callable[[_K], Iterable[_V]], poolSize: int = ..., bufferSize: Optional[int] = None) -> stream[_V]: ...
+
+    @overload
+    def fastFlatMap(
+        self,
+        poolSize: int = ...,
+        bufferSize: Optional[int] = None,
+    ) -> stream[_K]: ...
+
     def fastFlatMap(
         self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC, poolSize: int = cpu_count(), bufferSize: Optional[int] = None
     ) -> "stream[_V]":
-        if not isinstance(poolSize, int) or poolSize <= 0 or poolSize > 2**12:
-            raise ValueError(f"poolSize should be an integer between 1 and 2^12. Received: {poolSize!s}")
         if poolSize == 1:
             return self.flatMap(predicate)
+        _validate_pool_size(poolSize)
         if bufferSize is None:
             bufferSize = poolSize
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
@@ -689,6 +779,12 @@ class _IStream(Iterable[_K], ABC):
 
     def enumerate(self: "stream[_K]") -> "stream[Tuple[int,_K]]":
         return stream(zip(range(0, sys.maxsize), self), source=self)
+
+    @overload
+    def flatMap(self, predicate: Callable[[_K], Iterable[_V]]) -> stream[_V]: ...
+
+    @overload
+    def flatMap(self) -> stream[_K]: ...
 
     def flatMap(self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC) -> "stream[_V]":
         """
@@ -713,36 +809,49 @@ class _IStream(Iterable[_K], ABC):
         """
         return self.map(lambda x: (f(x), x))
 
-    def mapKeys(self: "stream[Tuple[_K, _V]]", f: Callable[[_K], _K2]) -> "stream[Tuple[_K2, _V]]":
+    def mapKeys(self: "stream[Tuple[_K, _V]]", f: Callable[[_K], _K2], parallel: Optional[Parallelism] = None) -> "stream[Tuple[_K2, _V]]":
         """Apply a unary function to the first elements of a stream of
         binary tuples. Useful when applying a tranformation to a stream
         but you want to keep the original values for a later
         transformation or filter, e.g. if you want to transform the keys
         of a dict but not the values.
         """
-        return self.map(lambda kv: (f(kv[0]), kv[1]))
+        if parallel is None:
+            return self.map(lambda kv: (f(kv[0]), kv[1]))
+        return self._ordered_parallel_map(partial(_map_key, f), parallel)
 
-    def mapValues(self: "stream[Tuple[_K, _V]]", f: Callable[[_V], _V2]) -> "stream[Tuple[_K, _V2]]":
+    def mapValues(self: "stream[Tuple[_K, _V]]", f: Callable[[_V], _V2], parallel: Optional[Parallelism] = None) -> "stream[Tuple[_K, _V2]]":
         """As mapKeys but to the second element of each tuple."""
-        return self.map(lambda kv: (kv[0], f(kv[1])))
+        if parallel is None:
+            return self.map(lambda kv: (kv[0], f(kv[1])))
+        return self._ordered_parallel_map(partial(_map_value, f), parallel)
 
-    def filterKeys(self: "stream[Tuple[_K, _V]]", predicate: Callable[[_K], bool]) -> "stream[Tuple[_K, _V]]":
+    def filterKeys(self: "stream[Tuple[_K, _V]]", predicate: Callable[[_K], bool], parallel: Optional[Parallelism] = None) -> "stream[Tuple[_K, _V]]":
         """Filter a stream of binary tuples according to a predicate on
         the first element.
         """
-        return self.filter(lambda kv: predicate(kv[0]))
+        if parallel is None:
+            return self.filter(lambda kv: predicate(kv[0]))
+        return self._ordered_parallel_filter(partial(_pair_with_key_predicate_result, predicate), parallel)
 
-    def filterValues(self: "stream[Tuple[_K, _V]]", predicate: Callable[[_V], bool]) -> "stream[Tuple[_K, _V]]":
+    def filterValues(self: "stream[Tuple[_K, _V]]", predicate: Callable[[_V], bool], parallel: Optional[Parallelism] = None) -> "stream[Tuple[_K, _V]]":
         """Filter a stream of binary tuples according to a predicate on
         the second element.
         """
-        return self.filter(lambda kv: predicate(kv[1]))
+        if parallel is None:
+            return self.filter(lambda kv: predicate(kv[1]))
+        return self._ordered_parallel_filter(partial(_pair_with_value_predicate_result, predicate), parallel)
 
-    def for_each(self, f: Callable[[_K], None]) -> None:
-        for el in self:
-            f(el)
+    def for_each(self, f: Callable[[_K], None], parallel: Optional[Parallelism] = None) -> None:
+        if parallel is None:
+            for el in self:
+                f(el)
+            return None
+        for _ in self._ordered_parallel_map(partial(_tap_mapper, f), parallel):
+            pass
+        return None
 
-    def tap(self, f: Callable[[_K], Any]) -> "stream[_K]":
+    def tap(self, f: Callable[[_K], Any], parallel: Optional[Parallelism] = None) -> "stream[_K]":
         """Apply a unary function to each element of this stream, but
         discard any return value and just return the original stream.
         Useful for functions with side effects, like logging.
@@ -765,13 +874,19 @@ class _IStream(Iterable[_K], ABC):
             2
             3
             [2, 4, 6]
+
+        When running with parallel workers, the output stream still preserves
+        input order, but side effects may happen out of order. With
+        ``Procs(...)``, side effects run in worker processes.
         """
+        if parallel is None:
 
-        def tap_f(x):
-            f(x)
-            return x
+            def tap_f(x):
+                f(x)
+                return x
 
-        return self.map(tap_f)
+            return self.map(tap_f)
+        return self._ordered_parallel_map(partial(_tap_mapper, f), parallel)
 
     def add_observer(self, f: Callable[[_K], None]) -> "stream[_K]":
         """
@@ -780,25 +895,31 @@ class _IStream(Iterable[_K], ABC):
         """
         return stream(ItrFromFunc(lambda: self.__add_observer_generator(f), length_hint=self.length_hint()))
 
-    def filter(self, predicate: Optional[Callable[[_K], bool]] = None) -> "stream[_K]":
+    def filter(self, predicate: Optional[Callable[[_K], bool]] = None, parallel: Optional[Parallelism] = None) -> "stream[_K]":
         """
         :param predicate: If predicate is None, return the items that are true.
         """
-        return stream(ItrFromFunc(lambda: filter(predicate, self)))
+        if parallel is None:
+            return stream(ItrFromFunc(lambda: filter(predicate, self)))
+        return self._ordered_parallel_filter(partial(_pair_with_predicate_result, predicate), parallel)
 
-    def filterfalse(self, predicate: Optional[Callable[[_K], bool]] = None) -> "stream[_K]":
+    def filterfalse(self, predicate: Optional[Callable[[_K], bool]] = None, parallel: Optional[Parallelism] = None) -> "stream[_K]":
         """
         :param predicate: If predicate is None, return the items that are true.
         """
-        return stream(ItrFromFunc(lambda: itertools.filterfalse(predicate, self)))
+        if parallel is None:
+            return stream(ItrFromFunc(lambda: itertools.filterfalse(predicate, self)))
+        return self._ordered_parallel_filter(partial(_pair_with_predicate_result, predicate), parallel, keep=False)
 
-    def starfilter(self: "stream[_K]", predicate: Callable[[_K | Any, ...], bool]) -> "stream[_K]":
+    def starfilter(self: "stream[_K]", predicate: Callable[[_K | Any, ...], bool], parallel: Optional[Parallelism] = None) -> "stream[_K]":
         """
         :param predicate:  Applies predicate unpacks the current item when calling predicate function.
             If predicate is None, returns the items that are true,
         :return: stream over iterable containing only the items where pred(*item) is True.
         """
-        return self.filter(lambda el: predicate(*el))
+        if parallel is None:
+            return self.filter(lambda el: predicate(*el))
+        return self._ordered_parallel_filter(partial(_pair_with_star_predicate_result, predicate), parallel)
 
     def reversed(self: "stream[_K]") -> "stream[_K]":
         try:
@@ -814,6 +935,9 @@ class _IStream(Iterable[_K], ABC):
             if f(e):
                 return True
         return False
+
+    @overload
+    def keyBy(self, keyfunc: Callable[[_K], _V]) -> stream[Tuple[_V, _K]]: ...
 
     def keyBy(self, keyfunc: Callable[[_K], _V] = _IDENTITY_FUNC) -> "stream[Tuple[_K, _V]]":
         """
@@ -835,6 +959,12 @@ class _IStream(Iterable[_K], ABC):
         :return: stream consisted of second element of tuples
         """
         return self.map(itemgetter(1))
+
+    @overload
+    def groupBy(self, keyfunc: Callable[[_K], _T]) -> slist[Tuple[_T, slist[_K]]]: ...
+
+    @overload
+    def groupBy(self) -> slist[Tuple[_K, slist[_K]]]: ...
 
     def groupBy(self, keyfunc: Callable[[_K], _T] = _IDENTITY_FUNC) -> "slist[Tuple[_T, slist[_K]]]":
         """
@@ -895,6 +1025,12 @@ class _IStream(Iterable[_K], ABC):
         for _, group in groupby(enumerate(itr), key=key_fn):
             yield stream(group).map(itemgetter(1))
 
+    @overload
+    def group_consecutive(self, order_fn: Callable[[_K], _T]) -> stream[Tuple[_T, stream[_K]]]: ...
+
+    @overload
+    def group_consecutive(self) -> stream[Tuple[_K, stream[_K]]]: ...
+
     def group_consecutive(self, order_fn: Callable[[_K], _T] = lambda x: x) -> "stream[Tuple[_T, stream[_K]]]":
         return stream(self.__group_consecutive_generator(self, order_fn))
 
@@ -906,6 +1042,12 @@ class _IStream(Iterable[_K], ABC):
     def __slist_on_second_el(t: Tuple[_K, Iterable[_T]]) -> "Tuple[_K, slist[_T]]":
         return t[0], slist(t[1])
 
+    @overload
+    def groupBySorted(self, keyfunc: Callable[[_K], _T]) -> stream[Tuple[_T, stream[_K]]]: ...
+
+    @overload
+    def groupBySorted(self) -> stream[Tuple[_K, stream[_K]]]: ...
+
     def groupBySorted(self, keyfunc: Optional[Callable[[_K], _T]] = None) -> "stream[Tuple[_T, stream[_K]]]":
         """
         Make a stream of consecutive keys and groups (as streams) from the self.
@@ -914,6 +1056,12 @@ class _IStream(Iterable[_K], ABC):
         :return: (key, sub-iterator) grouped by each value of key(value).
         """
         return stream(partial(groupby, iterable=self, key=keyfunc)).map(self.__stream_on_second_el)
+
+    @overload
+    def groupBySortedToList(self, keyfunc: Callable[[_K], _T]) -> stream[Tuple[_T, slist[_K]]]: ...
+
+    @overload
+    def groupBySortedToList(self) -> stream[Tuple[_K, slist[_K]]]: ...
 
     def groupBySortedToList(self, keyfunc: Callable[[_K], _T] = _IDENTITY_FUNC) -> "stream[Tuple[_T, slist[_K]]]":
         """
@@ -938,9 +1086,6 @@ class _IStream(Iterable[_K], ABC):
 
     @overload
     def reduce(self, f: Callable[[Union[_K, _T], _K], _T], init: Optional[_K] = None) -> _T: ...
-
-    @overload
-    def reduce(self, f: Callable[[_T, _K], _T], init: _T = None) -> _T: ...
 
     def reduce(self, f, init=None):
         if init is None:
@@ -1000,7 +1145,7 @@ class _IStream(Iterable[_K], ABC):
         return pd.DataFrame.from_records(self.toList(), *args, **kwargs)
 
     @overload
-    def __getitem__(self, i: slice) -> "stream[_K]": ...
+    def __getitem__(self, i: slice) -> stream[_K]: ...
 
     @overload
     def __getitem__(self, i: int) -> _K: ...
@@ -1233,8 +1378,20 @@ class _IStream(Iterable[_K], ABC):
     def sum(self) -> numbers.Real:
         return sum(self)
 
+    @overload
+    def min(self) -> _K: ...
+
+    @overload
+    def min(self, key: Callable[[_K], _V]) -> _K: ...
+
     def min(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> _V:
         return min(self, key=key)
+
+    @overload
+    def min_default(self, default: _T) -> Union[_K, _T]: ...
+
+    @overload
+    def min_default(self, default: _T, key: Callable[[_K], _V]) -> Union[_K, _T]: ...
 
     def min_default(self, default: _T, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> Union[_V, _T]:
         """
@@ -1248,8 +1405,20 @@ class _IStream(Iterable[_K], ABC):
                 return default
             raise
 
+    @overload
+    def max(self) -> _K: ...
+
+    @overload
+    def max(self, key: Callable[[_K], _V]) -> _K: ...
+
     def max(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> _V:
         return max(self, key=key)
+
+    @overload
+    def maxes(self) -> slist[_K]: ...
+
+    @overload
+    def maxes(self, key: Callable[[_K], _V]) -> slist[_K]: ...
 
     def maxes(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> "slist[_V]":
         i = iter(self)
@@ -1263,6 +1432,12 @@ class _IStream(Iterable[_K], ABC):
             elif k == mval:
                 aMaxes.append(v)
         return aMaxes
+
+    @overload
+    def mins(self) -> slist[_K]: ...
+
+    @overload
+    def mins(self, key: Callable[[_K], _V]) -> slist[_K]: ...
 
     def mins(self, key: Callable[[_K], _V] = _IDENTITY_FUNC) -> "slist[_V]":
         i = iter(self)
@@ -1817,9 +1992,20 @@ class slist(List[_K], stream):
     def _itr(self):
         return ItrFromFunc(lambda: iter(self))
 
-    # pylint: disable=super-init-notcalled, non-parent-init-called
+    @overload
+    def __init__(self) -> None: ...
+
+    @overload
+    def __init__(self, iterable: Iterable[_K]) -> None: ...
+
     def __init__(self, *args, **kwrds):
         list.__init__(self, *args, **kwrds)
+
+    @overload
+    def __getitem__(self, item: slice) -> slist[_K]: ...
+
+    @overload
+    def __getitem__(self, item: int) -> _K: ...
 
     def __getitem__(self, item) -> "Union[_K,slist[_K]]":
         if isinstance(item, slice):

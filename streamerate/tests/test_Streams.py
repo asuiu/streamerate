@@ -4,6 +4,7 @@ import pickle
 import random
 import re
 import sys
+import tempfile
 import time
 import traceback
 import unittest
@@ -30,7 +31,10 @@ except ImportError:
 from pyxtension.Json import Json, JsonList
 
 from streamerate.streams import (
+    Procs,
+    Threads,
     TqdmMapper,
+    _StartMethod,
     defaultstreamdict,
     sdict,
     slist,
@@ -77,6 +81,37 @@ class SomeCustomException(Exception):
 
 def PICKABLE_FUNCTION_RAISES(x):
     raise SomeCustomException("")
+
+
+def PICKABLE_TO_UPPER_DELAYED(x: str) -> str:
+    time.sleep((ord(x) % 3) / 1000)
+    return x.upper()
+
+
+def PICKABLE_ADD_ONE_DELAYED(x: int) -> int:
+    time.sleep((x % 3) / 1000)
+    return x + 1
+
+
+def PICKABLE_KEY_IN_ACE_DELAYED(x: str) -> bool:
+    time.sleep((ord(x) % 3) / 1000)
+    return x in {"a", "c", "e"}
+
+
+def PICKABLE_IS_EVEN_DELAYED(x: int) -> bool:
+    time.sleep((x % 3) / 1000)
+    return x % 2 == 0
+
+
+def PICKABLE_GT_DELAYED(x: int, y: int) -> bool:
+    time.sleep(((x + y) % 3) / 1000)
+    return x > y
+
+
+def PICKABLE_APPEND_TO_FILE(path: str, el) -> None:
+    time.sleep((len(str(el)) % 3) / 1000)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(f"{el}\n")
 
 
 class SlistTestCase(unittest.TestCase):
@@ -1695,6 +1730,142 @@ class StreamTestCase(unittest.TestCase):
         result2 = s.toList()
         self.assertListEqual(l1, [0, 1, 2, 0, 1, 2])
         self.assertListEqual(result2, [0, 1, 2])
+
+
+class ParallelHelperMethodsTestCase(unittest.TestCase):
+    def test_mapKeys_parallel_threads_preserves_order(self):
+        s = stream([("a", 1), ("b", 2), ("c", 3)])
+        self.assertListEqual(s.mapKeys(PICKABLE_TO_UPPER_DELAYED, parallel=Threads(3)).toList(), [("A", 1), ("B", 2), ("C", 3)])
+
+    def test_mapValues_parallel_threads_preserves_order(self):
+        s = stream([("a", 1), ("b", 2), ("c", 3)])
+        self.assertListEqual(s.mapValues(PICKABLE_ADD_ONE_DELAYED, parallel=Threads(3)).toList(), [("a", 2), ("b", 3), ("c", 4)])
+
+    def test_filterKeys_parallel_threads_preserves_order(self):
+        s = stream([("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)])
+        self.assertListEqual(
+            s.filterKeys(PICKABLE_KEY_IN_ACE_DELAYED, parallel=Threads(3)).toList(),
+            [("a", 1), ("c", 3), ("e", 5)],
+        )
+
+    def test_filterValues_parallel_threads_preserves_order(self):
+        s = stream([("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)])
+        self.assertListEqual(
+            s.filterValues(PICKABLE_IS_EVEN_DELAYED, parallel=Threads(3)).toList(),
+            [("b", 2), ("d", 4)],
+        )
+
+    def test_filter_parallel_threads_preserves_order(self):
+        self.assertListEqual(stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Threads(3)).toList(), [0, 2, 4])
+
+    def test_filterfalse_parallel_threads_preserves_order(self):
+        self.assertListEqual(stream(range(6)).filterfalse(PICKABLE_IS_EVEN_DELAYED, parallel=Threads(3)).toList(), [1, 3, 5])
+
+    def test_filter_and_filterfalse_parallel_threads_handle_none_predicate(self):
+        s = stream([0, 1, "", 2, None, 3])
+        self.assertListEqual(s.filter(parallel=Threads(3)).toList(), [1, 2, 3])
+        self.assertListEqual(s.filterfalse(parallel=Threads(3)).toList(), [0, "", None])
+
+    def test_starfilter_parallel_threads_preserves_order(self):
+        s = stream([(2, 5), (3, 2), (10, 3), (1, 9)])
+        self.assertListEqual(s.starfilter(PICKABLE_GT_DELAYED, parallel=Threads(3)).toList(), [(3, 2), (10, 3)])
+
+    def test_tap_parallel_threads_preserves_stream_order(self):
+        seen = []
+
+        def record(x):
+            time.sleep((x % 3) / 1000)
+            seen.append(x)
+
+        s = stream(range(6))
+        self.assertListEqual(s.tap(record, parallel=Threads(3)).toList(), list(range(6)))
+        self.assertCountEqual(seen, list(range(6)))
+
+    def test_for_each_parallel_threads_runs_all_callbacks(self):
+        seen = []
+
+        def record(x):
+            time.sleep((x % 3) / 1000)
+            seen.append(x)
+
+        result = stream(range(6)).for_each(record, parallel=Threads(3))
+        self.assertIsNone(result)
+        self.assertCountEqual(seen, list(range(6)))
+
+    def test_mapKeys_parallel_processes_preserves_order(self):
+        s = stream([("a", 1), ("b", 2), ("c", 3)])
+        self.assertListEqual(s.mapKeys(PICKABLE_TO_UPPER_DELAYED, parallel=Procs(3)).toList(), [("A", 1), ("B", 2), ("C", 3)])
+
+    def test_filter_parallel_processes_preserves_order(self):
+        self.assertListEqual(stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Procs(3)).toList(), [0, 2, 4])
+
+    def test_starfilter_parallel_processes_preserves_order(self):
+        s = stream([(2, 5), (3, 2), (10, 3), (1, 9)])
+        self.assertListEqual(s.starfilter(PICKABLE_GT_DELAYED, parallel=Procs(3)).toList(), [(3, 2), (10, 3)])
+
+    def test_tap_parallel_processes_preserves_stream_order(self):
+        fd, path = tempfile.mkstemp()
+        os.close(fd)
+        try:
+            callback = partial(PICKABLE_APPEND_TO_FILE, path)
+            self.assertListEqual(stream(range(6)).tap(callback, parallel=Procs(3)).toList(), list(range(6)))
+            with open(path, encoding="utf-8") as fh:
+                seen = [int(line.strip()) for line in fh if line.strip()]
+            self.assertCountEqual(seen, list(range(6)))
+        finally:
+            os.unlink(path)
+
+    def test_for_each_parallel_processes_runs_worker_side_effects(self):
+        fd, path = tempfile.mkstemp()
+        os.close(fd)
+        try:
+            callback = partial(PICKABLE_APPEND_TO_FILE, path)
+            result = stream(range(6)).for_each(callback, parallel=Procs(3))
+            self.assertIsNone(result)
+            with open(path, encoding="utf-8") as fh:
+                seen = [int(line.strip()) for line in fh if line.strip()]
+            self.assertCountEqual(seen, list(range(6)))
+        finally:
+            os.unlink(path)
+
+    def test_parallel_helpers_accept_parallel_none(self):
+        self.assertListEqual(stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=None).toList(), [0, 2, 4])
+
+    def test_parallel_helpers_skip_parallel_dispatch_when_parallel_is_none(self):
+        s = stream([("a", 1), ("b", 2), ("c", 3)])
+        with unittest.mock.patch.object(stream, "_ordered_parallel_map", side_effect=AssertionError("_ordered_parallel_map should not be called")):
+            with unittest.mock.patch.object(
+                stream,
+                "_ordered_parallel_filter",
+                side_effect=AssertionError("_ordered_parallel_filter should not be called"),
+            ):
+                self.assertListEqual(s.mapKeys(str.upper).toList(), [("A", 1), ("B", 2), ("C", 3)])
+                self.assertListEqual(s.mapValues(lambda x: x + 1).toList(), [("a", 2), ("b", 3), ("c", 4)])
+                self.assertListEqual(s.filterKeys(lambda x: x != "b").toList(), [("a", 1), ("c", 3)])
+                self.assertListEqual(s.filterValues(lambda x: x % 2 == 1).toList(), [("a", 1), ("c", 3)])
+                self.assertListEqual(stream(range(4)).tap(lambda x: x).toList(), [0, 1, 2, 3])
+                self.assertIsNone(stream(range(4)).for_each(lambda x: x))
+                self.assertListEqual(stream(range(6)).filter(lambda x: x % 2 == 0).toList(), [0, 2, 4])
+                self.assertListEqual(stream(range(6)).filterfalse(lambda x: x % 2 == 0).toList(), [1, 3, 5])
+                self.assertListEqual(stream([(2, 5), (3, 2)]).starfilter(lambda x, y: x > y).toList(), [(3, 2)])
+
+    def test_parallel_helpers_reject_bare_int_parallel(self):
+        with self.assertRaises(ValueError):
+            stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=1).toList()
+
+    def test_parallel_helpers_reject_invalid_buffer_size(self):
+        with self.assertRaises(ValueError):
+            stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Threads(2, bufferSize=0)).toList()
+
+    def test_parallel_helpers_reject_invalid_start_method(self):
+        with self.assertRaises(ValueError):
+            stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Procs(2, start_method="bogus")).toList()
+
+    def test_parallel_helpers_accept_start_method_enum(self):
+        self.assertListEqual(
+            stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Procs(3, start_method=_StartMethod.SPAWN)).toList(),
+            [0, 2, 4],
+        )
 
 
 class LengthHintTestCase(unittest.TestCase):

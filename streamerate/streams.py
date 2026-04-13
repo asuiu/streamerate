@@ -15,6 +15,7 @@ import pickle
 import struct
 import sys
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections import abc, defaultdict
 from dataclasses import dataclass
@@ -44,6 +45,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Type,
     TypeVar,
     Union,
     overload,
@@ -127,6 +129,35 @@ class Procs(Parallelism):
         available_start_methods = multiprocessing.get_all_start_methods()
         if self.start_method.value not in available_start_methods:
             raise ValueError(f"start_method should be one of {available_start_methods}. Received: {self.start_method!s}")
+
+
+class safe_call:
+    """
+    A picklable wrapper that executes a function in a try/except context.
+    If the function raises an exception that matches `exceptions`, it can retry based on `retries`, `delay`, and `backoff`.
+    If retries are exhausted, it returns the exception object instead of raising it.
+    """
+
+    def __init__(self, func: Callable, exceptions: Tuple[Type[Exception], ...] = (Exception,), retries: int = 0, delay: float = 0.0, backoff: float = 1.0):
+        self.func = func
+        self.exceptions = exceptions
+        self.retries = retries
+        self.delay = delay
+        self.backoff = backoff
+
+    def __call__(self, *args, **kwargs) -> Any:
+        current_delay = self.delay
+        last_exception = None
+        for attempt in range(self.retries + 1):
+            try:
+                return self.func(*args, **kwargs)
+            except self.exceptions as e:
+                last_exception = e
+                if attempt < self.retries:
+                    if current_delay > 0:
+                        time.sleep(current_delay)
+                    current_delay *= self.backoff
+        return last_exception
 
 
 def _map_key(f: Callable[[_K], _K2], kv: Tuple[_K, _V]) -> Tuple[_K2, _V]:
@@ -558,8 +589,24 @@ class _IStream(Iterable[_K], ABC):
             observer(el)
             yield el
 
-    def map(self: "stream[_K]", f: Callable[[_K], _V]) -> "stream[_V]":
-        return stream(partial(map, f, self), source=self)
+    def map(self: "stream[_K]", f: Callable[[_K], _V], parallel: Optional[Parallelism] = None) -> "stream[_V]":
+        if parallel is None:
+            return stream(partial(map, f, self), source=self)
+        return self._ordered_parallel_map(f, parallel)
+
+    def safe_map(
+        self: "stream[_K]",
+        f: Callable[[_K], _V],
+        parallel: Optional[Parallelism] = None,
+        exceptions: Tuple[Type[Exception], ...] = (Exception,),
+        retries: int = 0,
+        delay: float = 0.0,
+        backoff: float = 1.0,
+    ) -> "stream[Union[_V, Exception]]":
+        safe_f = safe_call(f, exceptions=exceptions, retries=retries, delay=delay, backoff=backoff)
+        if parallel is None:
+            return self.map(safe_f)
+        return self._ordered_parallel_map(safe_f, parallel)
 
     def starmap(self: "stream[Iterable[_K|Any]]", f: Callable[[_K | Any, ...], _V]) -> "stream[_V]":
         return stream(partial(itertools.starmap, f, self), source=self)

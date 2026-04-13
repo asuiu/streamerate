@@ -1733,6 +1733,14 @@ class StreamTestCase(unittest.TestCase):
 
 
 class ParallelHelperMethodsTestCase(unittest.TestCase):
+    def test_map_parallel_threads_preserves_order(self):
+        s = stream(["a", "b", "c"])
+        self.assertListEqual(s.map(PICKABLE_TO_UPPER_DELAYED, parallel=Threads(3)).toList(), ["A", "B", "C"])
+
+    def test_map_parallel_processes_preserves_order(self):
+        s = stream(["a", "b", "c"])
+        self.assertListEqual(s.map(PICKABLE_TO_UPPER_DELAYED, parallel=Procs(3)).toList(), ["A", "B", "C"])
+
     def test_mapKeys_parallel_threads_preserves_order(self):
         s = stream([("a", 1), ("b", 2), ("c", 3)])
         self.assertListEqual(s.mapKeys(PICKABLE_TO_UPPER_DELAYED, parallel=Threads(3)).toList(), [("A", 1), ("B", 2), ("C", 3)])

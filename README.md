@@ -39,6 +39,32 @@ poetry install
 poetry run ./run_tests.py
 ```
 
+### Versioning and Committing (Commitizen)
+This project uses [commitizen](https://commitizen-tools.github.io/commitizen/) for conventional commits and automatic semantic version bumping.
+
+**Making a commit:**
+To launch the interactive commit prompt and automatically format your commit message:
+```bash
+poetry run cz commit
+```
+
+**Bypassing pre-commit hooks:**
+If you need to skip the `pre-commit` linters (like `pylint` and `ruff`) when committing, you must use a double `--` separator so Poetry passes the argument directly to `cz` and `git`:
+```bash
+poetry run cz commit -- -- --no-verify
+```
+
+**Bumping the version:**
+To automatically calculate the next Semantic Version based on your recent commits, update `pyproject.toml`, and generate a git tag:
+```bash
+poetry run cz bump
+```
+
+**Bypassing hooks during a bump:**
+```bash
+poetry run cz bump --no-verify
+```
+
 
 ## Modules overview
 

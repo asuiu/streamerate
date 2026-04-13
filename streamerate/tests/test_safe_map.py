@@ -1,8 +1,9 @@
+import sys
 import time
 import unittest
 
 from streamerate import stream
-from streamerate.streams import Procs, Threads, safe_call
+from streamerate.streams import Procs, StartMethod, Threads, safe_call
 
 
 class FailUntilN:
@@ -26,6 +27,25 @@ def failing_func(x):
 
 def unhandled_fail_func(x):
     raise KeyError("Unhandled")
+
+
+class TestStartMethod(unittest.TestCase):
+    def test_auto_nominal(self):
+        with self.assertRaises(ValueError):
+            StartMethod("auto")
+
+        self.assertEqual(StartMethod.SPAWN, StartMethod("spawn"))
+
+        if sys.platform == "win32":
+            with self.assertRaises(ValueError):
+                StartMethod("fork")
+            with self.assertRaises(ValueError):
+                StartMethod("forkserver")
+
+        else:
+            sm = StartMethod("forkserver")
+            self.assertEqual(StartMethod.FORKSERVER, sm)
+            self.assertEqual(StartMethod.FORK, StartMethod("fork"))
 
 
 class TestSafeCall(unittest.TestCase):

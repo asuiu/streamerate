@@ -185,15 +185,20 @@ accept `parallel=` with one of:
 
 - `None` for sequential execution (default)
 - `Threads(poolSize, bufferSize=None)` for ordered multithreaded execution
-- `Procs(poolSize, bufferSize=None, start_method=_StartMethod.SPAWN)` for ordered multiprocessing execution
+- `Procs(poolSize, bufferSize=None, start_method=StartMethod.AUTO)` for ordered multiprocessing execution
 
 When `bufferSize` is omitted, `Parallelism` sets it to `poolSize * 2`.
 
+`StartMethod.AUTO` is the default. It resolves to `spawn` on Windows, and to `forkserver` on Linux and other POSIX platforms when available, otherwise `spawn`.
+
+`StartMethod.FASTEST` resolves to `fork` on Linux and other POSIX platforms when available, otherwise `forkserver`, and falls back to `spawn` on Windows.
+
 ```python
-from streamerate import Procs, Threads, _StartMethod, stream
+from streamerate import Procs, Threads, StartMethod, stream
 
 stream({"a": 1, "b": 2}.items()).mapKeys(str.upper, parallel=Threads(4)).toMap()
-stream(range(10)).filter(lambda x: x % 2 == 0, parallel=Procs(4, start_method=_StartMethod.SPAWN)).toList()
+stream(range(10)).filter(lambda x: x % 2 == 0, parallel=Procs(4)).toList()
+stream(range(10)).filter(lambda x: x % 2 == 0, parallel=Procs(4, start_method=StartMethod.FASTEST)).toList()
 ```
 
 For `tap` and `for_each`, the output order is still preserved, but side effects may happen out of order. With `Procs(...)`, side effects run in worker processes.

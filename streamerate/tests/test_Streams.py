@@ -32,9 +32,9 @@ from pyxtension.Json import Json, JsonList
 
 from streamerate.streams import (
     Procs,
+    StartMethod,
     Threads,
     TqdmMapper,
-    _StartMethod,
     defaultstreamdict,
     sdict,
     slist,
@@ -1867,11 +1867,11 @@ class ParallelHelperMethodsTestCase(unittest.TestCase):
 
     def test_parallel_helpers_reject_invalid_start_method(self):
         with self.assertRaises(ValueError):
-            stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Procs(2, start_method="bogus")).toList()
+            Procs(2, start_method="bogus")
 
     def test_parallel_helpers_accept_start_method_enum(self):
         self.assertListEqual(
-            stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Procs(3, start_method=_StartMethod.SPAWN)).toList(),
+            stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Procs(2, start_method=StartMethod.FASTEST)).toList(),
             [0, 2, 4],
         )
 

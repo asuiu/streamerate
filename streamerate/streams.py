@@ -91,10 +91,27 @@ def _IDENTITY_FUNC(x: _T) -> _T:
     return x
 
 
-class _StartMethod(StrEnum):
+def __get_defaul_start_methods() -> Tuple[str, str]:
+    available = multiprocessing.get_all_start_methods()
+    if "spawn" not in available:
+        return None, None
+    if sys.platform == "win32":
+        return "spawn", "spawn"
+
+    fork_server = "forkserver" if "forkserver" in available else "spawn"
+    fork = "fork" if "fork" in available else "spawn"
+    return fork_server, fork
+
+
+_AUTO_START_METHOD, _FASTEST_START_METHOD = __get_defaul_start_methods()
+
+
+class StartMethod(StrEnum):
+    AUTO = _AUTO_START_METHOD
+    FASTEST = _FASTEST_START_METHOD
     SPAWN = "spawn"
-    FORK = "fork"
-    FORKSERVER = "forkserver"
+    FORK = _FASTEST_START_METHOD
+    FORKSERVER = _AUTO_START_METHOD
 
 
 def _validate_pool_size(poolSize: int) -> None:
@@ -120,15 +137,12 @@ class Threads(Parallelism):
 
 @dataclass(frozen=True, slots=True)
 class Procs(Parallelism):
-    start_method: _StartMethod = _StartMethod.SPAWN
+    start_method: StartMethod = StartMethod.AUTO
 
     def __post_init__(self) -> None:
         Parallelism.__post_init__(self)
-        if not isinstance(self.start_method, _StartMethod):
-            raise ValueError(f"start_method should be an instance of _StartMethod. Received: {self.start_method!r}")
-        available_start_methods = multiprocessing.get_all_start_methods()
-        if self.start_method.value not in available_start_methods:
-            raise ValueError(f"start_method should be one of {available_start_methods}. Received: {self.start_method!s}")
+        if not isinstance(self.start_method, StartMethod):
+            raise ValueError(f"start_method should be an instance of StartMethod. Received: {self.start_method!r}")
 
 
 class safe_call:
@@ -517,10 +531,8 @@ class _IStream(Iterable[_K], ABC):
             pickling_support.install(e)
             return _MapException(sys.exc_info())
 
-    def _mp_pool_generator(
-        self, f: Callable[[_K], _V], poolSize: int, bufferSize: int, start_method: Literal["spawn", "fork", "forkserver"]
-    ) -> Generator[_V, None, None]:
-        ctx = multiprocessing.get_context(start_method)
+    def _mp_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int, start_method: StartMethod) -> Generator[_V, None, None]:
+        ctx = multiprocessing.get_context(start_method.value)
         p = ctx.Pool(poolSize)
         decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
         for el in p.imap(decorated_f_with_exc_passing, self, chunksize=bufferSize):
@@ -552,10 +564,8 @@ class _IStream(Iterable[_K], ABC):
             yield el
         p.join()
 
-    def _mp_fast_pool_generator(
-        self, f: Callable[[_K], _V], poolSize: int, bufferSize: int, start_method: Literal["spawn", "fork", "forkserver"]
-    ) -> Generator[_V, None, None]:
-        ctx = multiprocessing.get_context(start_method)
+    def _mp_fast_pool_generator(self, f: Callable[[_K], _V], poolSize: int, bufferSize: int, start_method: StartMethod) -> Generator[_V, None, None]:
+        ctx = multiprocessing.get_context(start_method.value)
         p = ctx.Pool(poolSize)
         try:
             decorated_f_with_exc_passing = partial(self.exc_info_decorator, f)
@@ -616,7 +626,7 @@ class _IStream(Iterable[_K], ABC):
         f: Callable[[_K], _V],
         poolSize: int = cpu_count(),
         bufferSize: Optional[int] = 1,
-        start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
+        start_method: StartMethod = _AUTO_START_METHOD,
     ) -> "stream[_V]":
         """
         Parallel ordered map using multiprocessing.Pool.imap
@@ -628,9 +638,8 @@ class _IStream(Iterable[_K], ABC):
         if poolSize == 1:
             return self.map(f)
         _validate_pool_size(poolSize)
-        available_start_methods = multiprocessing.get_all_start_methods()
-        if start_method not in available_start_methods:
-            raise ValueError(f"start_method should be one of {available_start_methods}. Received: {start_method!s}")
+        if not isinstance(start_method, StartMethod):
+            start_method = StartMethod(start_method)
         if bufferSize is None:
             bufferSize = poolSize * 2
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
@@ -643,7 +652,7 @@ class _IStream(Iterable[_K], ABC):
         f: Callable[[_K | Any, ...], _V],
         poolSize: int | Pool = cpu_count(),
         bufferSize: int | None = 1,
-        start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
+        start_method: Literal["spawn", "fork", "forkserver"] | StartMethod = StartMethod.AUTO,
     ) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
@@ -659,7 +668,7 @@ class _IStream(Iterable[_K], ABC):
         f: Callable[[_K], _V],
         poolSize: int | Pool = cpu_count(),
         bufferSize: int = 1,
-        start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
+        start_method: Literal["spawn", "fork", "forkserver"] | StartMethod = StartMethod.AUTO,
     ) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
@@ -671,9 +680,8 @@ class _IStream(Iterable[_K], ABC):
         if poolSize == 1:
             return self.map(f)
         _validate_pool_size(poolSize)
-        available_start_methods = multiprocessing.get_all_start_methods()
-        if start_method not in available_start_methods:
-            raise ValueError(f"start_method should be one of {available_start_methods}. Received: {start_method!s}")
+        if not isinstance(start_method, StartMethod):
+            start_method = StartMethod(start_method)
         if bufferSize is None:
             bufferSize = poolSize * 2
         if not isinstance(bufferSize, int) or bufferSize <= 0 or bufferSize > 2**12:
@@ -690,7 +698,7 @@ class _IStream(Iterable[_K], ABC):
         f: Callable[[_K | Any, ...], _V],
         poolSize: Union[int, Pool] = cpu_count(),
         bufferSize: Optional[int] = 1,
-        start_method: Literal["spawn", "fork", "forkserver"] = "spawn",
+        start_method: Literal["spawn", "fork", "forkserver"] | StartMethod = StartMethod.AUTO,
     ) -> "stream[_V]":
         """
         Parallel unordered map using multiprocessing.Pool.imap_unordered
@@ -800,11 +808,7 @@ class _IStream(Iterable[_K], ABC):
     def fastFlatMap(self, predicate: Callable[[_K], Iterable[_V]], poolSize: int = ..., bufferSize: Optional[int] = None) -> stream[_V]: ...
 
     @overload
-    def fastFlatMap(
-        self,
-        poolSize: int = ...,
-        bufferSize: Optional[int] = None,
-    ) -> stream[_K]: ...
+    def fastFlatMap(self, poolSize: int = ..., bufferSize: Optional[int] = None) -> stream[_K]: ...
 
     def fastFlatMap(
         self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC, poolSize: int = cpu_count(), bufferSize: Optional[int] = None

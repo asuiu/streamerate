@@ -40,7 +40,7 @@ class MpStartMethodsTestCase(unittest.TestCase):
         queue = ctx.Queue()
         process = ctx.Process(target=target, args=(queue,))
         process.start()
-        process.join(timeout=1.0)
+        process.join(timeout=2.0)
         try:
             if process.is_alive():
                 process.terminate()

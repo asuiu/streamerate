@@ -891,16 +891,16 @@ class _IStream(Iterable[_K], ABC):
         return self.gtmap(lambda el: f(*el), poolSize)
 
     @overload
-    def fastFlatMap(self: _IStream[Iterable[_V]]) -> stream[_V]: ...
+    def fastFlatMap(self) -> stream[_V]: ...  # type: ignore
 
     @overload
-    def fastFlatMap(self: _IStream[Iterable[_V]], poolSize: int = ..., bufferSize: Optional[int] = None) -> stream[_V]: ...
+    def fastFlatMap(self, poolSize: int = ..., bufferSize: Optional[int] = None) -> stream[_V]: ...
 
     @overload
-    def fastFlatMap(self: _IStream[_K], predicate: Callable[[_K], Iterable[_V]], poolSize: int = ..., bufferSize: Optional[int] = None) -> stream[_V]: ...
+    def fastFlatMap(self, predicate: Callable[[_K], Iterable[_V]], poolSize: int = ..., bufferSize: Optional[int] = None) -> stream[_V]: ...
 
     def fastFlatMap(
-        self: _IStream[_K], predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC_ITER, poolSize: int = _DEFAULT_POOL_SIZE, bufferSize: Optional[int] = None
+        self, predicate: Callable[[_K], Iterable[_V]] = _IDENTITY_FUNC_ITER, poolSize: int = _DEFAULT_POOL_SIZE, bufferSize: Optional[int] = None
     ) -> stream[_V]:
         if poolSize == 1:
             return self.flatMap(predicate)
@@ -921,7 +921,7 @@ class _IStream(Iterable[_K], ABC):
         return stream(zip(range(0, sys.maxsize), self), source=self)
 
     @overload
-    def flatMap(self: _IStream[Iterable[_V]]) -> stream[_V]: ...
+    def flatMap(self) -> stream[_V]: ...  # type: ignore
 
     @overload
     def flatMap(self, predicate: Callable[[_K], Iterable[_V]]) -> stream[_V]: ...

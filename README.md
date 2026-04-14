@@ -184,21 +184,34 @@ The ordered helper methods `mapKeys`, `mapValues`, `filterKeys`, `filterValues`,
 accept `parallel=` with one of:
 
 - `None` for sequential execution (default)
-- `Threads(poolSize, bufferSize=None)` for ordered multithreaded execution
-- `Procs(poolSize, bufferSize=None, start_method=StartMethod.AUTO)` for ordered multiprocessing execution
+- `Threads(poolSize=None, bufferSize=None, *, pool=None)` for ordered multithreaded execution
+- `Procs(poolSize=None, bufferSize=None, start_method=StartMethod.AUTO, *, pool=None)` for ordered multiprocessing execution
 
 When `bufferSize` is omitted, `Parallelism` sets it to `poolSize * 2`.
+
+When `pool=` is provided, `Threads` derives `poolSize` from `pool._processes`, uses the caller-supplied pool as-is, and leaves pool lifecycle management to the caller.
+`pool` is keyword-only, and cannot be combined with `poolSize`.
+
+When `pool=` is provided, `Procs` derives `poolSize` from `pool._processes`, uses the caller-supplied pool as-is, and leaves pool lifecycle management to the caller.
+`pool` is keyword-only, and cannot be combined with `poolSize` or a non-default `start_method`.
 
 `StartMethod.AUTO` is the default. It resolves to `spawn` on Windows, and to `forkserver` on Linux and other POSIX platforms when available, otherwise `spawn`.
 
 `StartMethod.FASTEST` resolves to `fork` on Linux and other POSIX platforms when available, otherwise `forkserver`, and falls back to `spawn` on Windows.
 
 ```python
+import multiprocessing
+from multiprocessing.pool import ThreadPool
+
 from streamerate import Procs, Threads, StartMethod, stream
 
 stream({"a": 1, "b": 2}.items()).mapKeys(str.upper, parallel=Threads(4)).toMap()
+with ThreadPool(4) as thread_pool:
+    stream({"a": 1, "b": 2}.items()).mapKeys(str.upper, parallel=Threads(pool=thread_pool)).toMap()
 stream(range(10)).filter(lambda x: x % 2 == 0, parallel=Procs(4)).toList()
 stream(range(10)).filter(lambda x: x % 2 == 0, parallel=Procs(4, start_method=StartMethod.FASTEST)).toList()
+with multiprocessing.get_context("forkserver").Pool(4) as pool:
+    stream(range(10)).filter(lambda x: x % 2 == 0, parallel=Procs(pool=pool)).toList()
 ```
 
 For `tap` and `for_each`, the output order is still preserved, but side effects may happen out of order. With `Procs(...)`, side effects run in worker processes.

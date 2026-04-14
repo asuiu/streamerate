@@ -1,4 +1,5 @@
 import io
+import multiprocessing
 import os
 import pickle
 import random
@@ -12,6 +13,7 @@ from functools import partial
 from io import BytesIO
 from itertools import permutations
 from multiprocessing import Pool
+from multiprocessing.pool import ThreadPool
 from typing import Generator
 from unittest.mock import MagicMock
 
@@ -46,6 +48,35 @@ ifilter = filter
 xrange = range
 
 __author__ = "andrei.suiu@gmail.com"
+if sys.platform == "win32":
+    _MP_CONTEXT = multiprocessing.get_context("spawn")
+else:
+    _MP_CONTEXT = multiprocessing.get_context("forkserver")
+
+# Worker processes import this module to resolve picklable helpers, so pool
+# creation must stay out of module import time.
+MP_POOL: Pool
+MT_POOL: ThreadPool
+
+
+def setUpModule():
+    global MP_POOL
+    global MT_POOL
+    MP_POOL = _MP_CONTEXT.Pool(10)
+    MT_POOL = ThreadPool(10)
+
+
+def tearDownModule():
+    global MP_POOL
+    global MT_POOL
+    if MP_POOL is not None:
+        MP_POOL.close()
+        MP_POOL.join()
+        MP_POOL = None
+    if MT_POOL is not None:
+        MT_POOL.close()
+        MT_POOL.join()
+        MT_POOL = None
 
 
 def PICKABLE_DUMB_FUNCTION(x):
@@ -719,15 +750,10 @@ class mtmapTestCase(unittest.TestCase):
 
 
 class mpmapTestCase(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.N_processes = 10
-        cls.pool = Pool(cls.N_processes)
-
     def test_mpmap_nominal(self):
         s = stream(xrange(10))
         f = partial(pow, 2)
-        res = s.mpmap(f, poolSize=4).toSet()
+        res = s.mpmap(f, poolSize=MP_POOL).toSet()
         expected = set(f(i) for i in xrange(10))
         self.assertSetEqual(res, expected)
 
@@ -735,32 +761,28 @@ class mpmapTestCase(unittest.TestCase):
         N = 10
         s = stream(xrange(N))
         t1 = time.time()
-        res = s.mpmap(PICKABLE_SLEEP_FUNC, poolSize=10).toSet()
+        res = s.mpmap(PICKABLE_SLEEP_FUNC, poolSize=MP_POOL).toSet()
         dt = time.time() - t1
         expected = set(i * i for i in xrange(N))
         self.assertSetEqual(res, expected)
-        self.assertLessEqual(dt, 2)
+        self.assertLessEqual(dt, 1)
 
     def test_mpmap_one_el(self):
-        s = stream(
-            [
-                2,
-            ]
-        )
+        s = stream([2])
         f = partial(pow, 2)
-        res = s.mpmap(f, poolSize=4).toSet()
+        res = s.mpmap(f, poolSize=MP_POOL).toSet()
         expected = set((4,))
         self.assertSetEqual(res, expected)
 
     def test_mpmap_no_el(self):
         s = stream([])
-        res = s.mpmap(lambda x: x * x, poolSize=4).toSet()
+        res = s.mpmap(lambda x: x * x, poolSize=MP_POOL).toSet()
         expected = set()
         self.assertSetEqual(res, expected)
 
     def test_mpmap_None_el(self):
         s = stream([None])
-        res = s.mpmap(PICKABLE_DUMB_FUNCTION, poolSize=4).toSet()
+        res = s.mpmap(PICKABLE_DUMB_FUNCTION, poolSize=MP_POOL).toSet()
         expected = set([None])
         self.assertSetEqual(res, expected)
 
@@ -773,7 +795,7 @@ class mpmapTestCase(unittest.TestCase):
             arr.append(i)
             return i
 
-        s = stream(range(100)).map(m).mpmap(PICKABLE_DUMB_FUNCTION, poolSize=4, bufferSize=5).take(20)
+        s = stream(range(100)).map(m).mpmap(PICKABLE_DUMB_FUNCTION, poolSize=MP_POOL, bufferSize=5).take(20)
         res = s.toList()
         self.assertLessEqual(len(arr), 30)
         self.assertEqual(len(res), 20)
@@ -782,12 +804,12 @@ class mpmapTestCase(unittest.TestCase):
         s = stream([None])
         f = partial(pow, 2)
         with self.assertRaises(TypeError):
-            _ = s.mpmap(f, poolSize=4).toSet()
+            _ = s.mpmap(f, poolSize=MP_POOL).toSet()
 
     def test_traceback_right_when_mpmap_raises_custom_exception(self):
         s = stream([None])
         try:
-            s.mpmap(PICKABLE_FUNCTION_RAISES, poolSize=4).toSet()
+            s.mpmap(PICKABLE_FUNCTION_RAISES, poolSize=MP_POOL).toSet()
         except SomeCustomException as e:
             line = traceback.TracebackException.from_exception(e).stack[5].line
             self.assertEqual(line, 'raise SomeCustomException("")')
@@ -796,23 +818,18 @@ class mpmapTestCase(unittest.TestCase):
 
     def test_mpmap_pids(self):
         s = stream(range(100))
-        distinct_pids = s.mpmap(PICKABLE_PID_GETTER, poolSize=10).toSet()
+        distinct_pids = s.mpmap(PICKABLE_PID_GETTER, poolSize=MP_POOL).toSet()
         self.assertGreaterEqual(len(distinct_pids), 2)
-        self.assertEqual(self.N_processes, self.pool._processes)
         self.assertNotIn(os.getpid(), distinct_pids)
 
 
 class mpfastmapTestCase(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.N_processes = 10
-        cls.pool = Pool(cls.N_processes)
 
     def test_mpfastmap_time(self):
-        N = self.N_processes
+        N = 10
         s = stream(xrange(N))
         t1 = time.time()
-        res = s.mpfastmap(PICKABLE_SLEEP_FUNC, poolSize=N).toSet()
+        res = s.mpfastmap(PICKABLE_SLEEP_FUNC, poolSize=MP_POOL).toSet()
         dt = time.time() - t1
         expected = set(i * i for i in xrange(N))
         self.assertSetEqual(res, expected)
@@ -821,7 +838,7 @@ class mpfastmapTestCase(unittest.TestCase):
     def test_traceback_right_when_mpfastmap_raises_custom_exception(self):
         s = stream([None])
         try:
-            s.mpfastmap(PICKABLE_FUNCTION_RAISES, poolSize=4).toSet()
+            s.mpfastmap(PICKABLE_FUNCTION_RAISES, poolSize=MP_POOL).toSet()
         except SomeCustomException as e:
             line = traceback.TracebackException.from_exception(e).stack[5].line
             self.assertEqual(line, 'raise SomeCustomException("")')
@@ -832,13 +849,13 @@ class mpfastmapTestCase(unittest.TestCase):
         s = stream([None])
         f = partial(pow, 2)
         with self.assertRaises(TypeError):
-            res = s.mpfastmap(f, poolSize=4).toSet()
+            res = s.mpfastmap(f, poolSize=MP_POOL).toSet()
 
     def test_mpfastmap_time_with_sequential_mapping(self):
-        N = self.N_processes
+        N = 10
         t1 = time.time()
         s = stream([0.2] * N + [10.0] * N)
-        res = s.mpfastmap(PICKABLE_SLEEP_EXACT, poolSize=N).take(N).toSet()
+        res = s.mpfastmap(PICKABLE_SLEEP_EXACT, poolSize=MP_POOL).take(N).toSet()
         dt = time.time() - t1
         expected = {
             0.2,
@@ -849,7 +866,7 @@ class mpfastmapTestCase(unittest.TestCase):
     def test_mpfastmap_nominal(self):
         s = stream(xrange(10))
         f = partial(pow, 2)
-        res = s.mpfastmap(f, poolSize=4).toSet()
+        res = s.mpfastmap(f, poolSize=MP_POOL).toSet()
         expected = set(f(i) for i in xrange(10))
         self.assertSetEqual(res, expected)
 
@@ -860,19 +877,19 @@ class mpfastmapTestCase(unittest.TestCase):
             ]
         )
         f = partial(pow, 2)
-        res = s.mpfastmap(f, poolSize=4).toSet()
+        res = s.mpfastmap(f, poolSize=MP_POOL).toSet()
         expected = set((4,))
         self.assertSetEqual(res, expected)
 
     def test_mpfastmap_no_el(self):
         s = stream([])
-        res = s.mpfastmap(lambda x: x * x, poolSize=4).toSet()
+        res = s.mpfastmap(lambda x: x * x, poolSize=MP_POOL).toSet()
         expected = set()
         self.assertSetEqual(res, expected)
 
     def test_mpfastmap_None_el(self):
         s = stream([None])
-        res = s.mpfastmap(PICKABLE_DUMB_FUNCTION, poolSize=4).toSet()
+        res = s.mpfastmap(PICKABLE_DUMB_FUNCTION, poolSize=MP_POOL).toSet()
         expected = set([None])
         self.assertSetEqual(res, expected)
 
@@ -885,7 +902,7 @@ class mpfastmapTestCase(unittest.TestCase):
             arr.append(i)
             return i
 
-        s = stream(range(100)).map(m).mpfastmap(PICKABLE_DUMB_FUNCTION, poolSize=4, bufferSize=1).take(20)
+        s = stream(range(100)).map(m).mpfastmap(PICKABLE_DUMB_FUNCTION, poolSize=MP_POOL, bufferSize=1).take(20)
         res = s.toList()
         self.assertLessEqual(len(arr), 30)
         self.assertEqual(len(res), 20)
@@ -1362,6 +1379,9 @@ class StreamTestCase(unittest.TestCase):
     def test_keyBy_nominal(self):
         self.assertListEqual(stream(["a", "bb", ""]).keyBy(len).toList(), [(1, "a"), (2, "bb"), (0, "")])
 
+    def test_keyBy_identity(self):
+        self.assertListEqual(stream(["a", "bb", ""]).keyBy().toList(), [("a", "a"), ("bb", "bb"), ("", "")])
+
     def test_keys_nominal(self):
         self.assertListEqual(stream([(1, "a"), (2, "bb"), (0, "")]).keystream().toList(), [1, 2, 0])
 
@@ -1741,6 +1761,14 @@ class ParallelHelperMethodsTestCase(unittest.TestCase):
         s = stream(["a", "b", "c"])
         self.assertListEqual(s.map(PICKABLE_TO_UPPER_DELAYED, parallel=Procs(3)).toList(), ["A", "B", "C"])
 
+    def test_map_parallel_processes_accepts_existing_pool(self):
+        s = stream(["a", "b", "c"])
+        self.assertListEqual(s.map(PICKABLE_TO_UPPER_DELAYED, parallel=Procs(pool=MP_POOL)).toList(), ["A", "B", "C"])
+
+    def test_map_parallel_threads_accepts_existing_pool(self):
+        s = stream(["a", "b", "c"])
+        self.assertListEqual(s.map(PICKABLE_TO_UPPER_DELAYED, parallel=Threads(pool=MT_POOL)).toList(), ["A", "B", "C"])
+
     def test_mapKeys_parallel_threads_preserves_order(self):
         s = stream([("a", 1), ("b", 2), ("c", 3)])
         self.assertListEqual(s.mapKeys(PICKABLE_TO_UPPER_DELAYED, parallel=Threads(3)).toList(), [("A", 1), ("B", 2), ("C", 3)])
@@ -1778,6 +1806,10 @@ class ParallelHelperMethodsTestCase(unittest.TestCase):
         s = stream([(2, 5), (3, 2), (10, 3), (1, 9)])
         self.assertListEqual(s.starfilter(PICKABLE_GT_DELAYED, parallel=Threads(3)).toList(), [(3, 2), (10, 3)])
 
+    def test_starfilter_parallel_threads_accepts_existing_pool(self):
+        s = stream([(2, 5), (3, 2), (10, 3), (1, 9)])
+        self.assertListEqual(s.starfilter(PICKABLE_GT_DELAYED, parallel=Threads(pool=MT_POOL)).toList(), [(3, 2), (10, 3)])
+
     def test_tap_parallel_threads_preserves_stream_order(self):
         seen = []
 
@@ -1787,6 +1819,17 @@ class ParallelHelperMethodsTestCase(unittest.TestCase):
 
         s = stream(range(6))
         self.assertListEqual(s.tap(record, parallel=Threads(3)).toList(), list(range(6)))
+        self.assertCountEqual(seen, list(range(6)))
+
+    def test_tap_parallel_threads_accepts_existing_pool(self):
+        seen = []
+
+        def record(x):
+            time.sleep((x % 3) / 1000)
+            seen.append(x)
+
+        s = stream(range(6))
+        self.assertListEqual(s.tap(record, parallel=Threads(pool=MT_POOL)).toList(), list(range(6)))
         self.assertCountEqual(seen, list(range(6)))
 
     def test_for_each_parallel_threads_runs_all_callbacks(self):
@@ -1811,12 +1854,28 @@ class ParallelHelperMethodsTestCase(unittest.TestCase):
         s = stream([(2, 5), (3, 2), (10, 3), (1, 9)])
         self.assertListEqual(s.starfilter(PICKABLE_GT_DELAYED, parallel=Procs(3)).toList(), [(3, 2), (10, 3)])
 
+    def test_starfilter_parallel_processes_accepts_existing_pool(self):
+        s = stream([(2, 5), (3, 2), (10, 3), (1, 9)])
+        self.assertListEqual(s.starfilter(PICKABLE_GT_DELAYED, parallel=Procs(pool=MP_POOL)).toList(), [(3, 2), (10, 3)])
+
     def test_tap_parallel_processes_preserves_stream_order(self):
         fd, path = tempfile.mkstemp()
         os.close(fd)
         try:
             callback = partial(PICKABLE_APPEND_TO_FILE, path)
             self.assertListEqual(stream(range(6)).tap(callback, parallel=Procs(3)).toList(), list(range(6)))
+            with open(path, encoding="utf-8") as fh:
+                seen = [int(line.strip()) for line in fh if line.strip()]
+            self.assertCountEqual(seen, list(range(6)))
+        finally:
+            os.unlink(path)
+
+    def test_tap_parallel_processes_accepts_existing_pool(self):
+        fd, path = tempfile.mkstemp()
+        os.close(fd)
+        try:
+            callback = partial(PICKABLE_APPEND_TO_FILE, path)
+            self.assertListEqual(stream(range(6)).tap(callback, parallel=Procs(pool=MP_POOL)).toList(), list(range(6)))
             with open(path, encoding="utf-8") as fh:
                 seen = [int(line.strip()) for line in fh if line.strip()]
             self.assertCountEqual(seen, list(range(6)))
@@ -1874,6 +1933,37 @@ class ParallelHelperMethodsTestCase(unittest.TestCase):
             stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=Procs(2, start_method=StartMethod.FASTEST)).toList(),
             [0, 2, 4],
         )
+
+    def test_parallel_helpers_accept_existing_pool(self):
+        parallel = Procs(pool=MP_POOL)
+        self.assertIs(parallel.pool, MP_POOL)
+        self.assertEqual(parallel.poolSize, MP_POOL._processes)
+        self.assertEqual(parallel.bufferSize, MP_POOL._processes * 2)
+        self.assertEqual(parallel.start_method, StartMethod.AUTO)
+
+    def test_parallel_helpers_accept_existing_thread_pool(self):
+        parallel = Threads(pool=MT_POOL)
+        self.assertIs(parallel.pool, MT_POOL)
+        self.assertEqual(parallel.poolSize, MT_POOL._processes)
+        self.assertEqual(parallel.bufferSize, MT_POOL._processes * 2)
+
+    def test_parallel_helpers_reject_pool_without_pool_size_or_start_method_overrides(self):
+        with self.assertRaises(ValueError):
+            Procs(pool=MP_POOL, poolSize=2)
+        with self.assertRaises(ValueError):
+            Procs(pool=MP_POOL, start_method=StartMethod.FASTEST)
+        with self.assertRaises(ValueError):
+            Threads(pool=MT_POOL, poolSize=2)
+
+    def test_parallel_helpers_reuse_existing_pool_across_calls(self):
+        parallel = Procs(pool=MP_POOL)
+        self.assertListEqual(stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=parallel).toList(), [0, 2, 4])
+        self.assertListEqual(stream(["a", "b", "c"]).map(PICKABLE_TO_UPPER_DELAYED, parallel=parallel).toList(), ["A", "B", "C"])
+
+    def test_parallel_helpers_reuse_existing_thread_pool_across_calls(self):
+        parallel = Threads(pool=MT_POOL)
+        self.assertListEqual(stream(range(6)).filter(PICKABLE_IS_EVEN_DELAYED, parallel=parallel).toList(), [0, 2, 4])
+        self.assertListEqual(stream(["a", "b", "c"]).map(PICKABLE_TO_UPPER_DELAYED, parallel=parallel).toList(), ["A", "B", "C"])
 
 
 class LengthHintTestCase(unittest.TestCase):
